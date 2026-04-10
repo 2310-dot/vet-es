@@ -10,12 +10,14 @@
 
 Chatbot y asistente de reservas para clínica veterinaria (caso ENAE). El backend previsto es **Python**, **LangChain** / LangGraph, **FastAPI**; el bot no diagnostica ni prescribe: orienta a citación, FAQs y procedimientos internos, citando herramientas o documentos recuperados.
 
-| Tecnología | Rol |
-| ---------- | --- |
-| **Python** | Servicios, APIs, cadenas/agentes LangChain. |
-| **LangChain** | Prompts, herramientas (citas, paciente, etc.), RAG sobre protocolos, memoria. |
-| **FastAPI** | Capa HTTP/API del bot. |
-| **Canal / frontend** | **TBD** — web, WhatsApp u otro; pendiente de decisión. |
+
+| Tecnología           | Rol                                                                           |
+| -------------------- | ----------------------------------------------------------------------------- |
+| **Python**           | Servicios, APIs, cadenas/agentes LangChain.                                   |
+| **LangChain**        | Prompts, herramientas (citas, paciente, etc.), RAG sobre protocolos, memoria. |
+| **FastAPI**          | Capa HTTP/API del bot.                                                        |
+| **Canal / frontend** | **TBD** — web, WhatsApp u otro; pendiente de decisión.                        |
+
 
 Detalle de implementación: [.cursor/skills/langchain-vet-chatbots/SKILL.md](.cursor/skills/langchain-vet-chatbots/SKILL.md), [.cursor/agents/backend-langchain-vet.md](.cursor/agents/backend-langchain-vet.md).
 
@@ -23,10 +25,12 @@ Detalle de implementación: [.cursor/skills/langchain-vet-chatbots/SKILL.md](.cu
 
 ## Equipo
 
-| Rol / área | Contacto / notas |
-| ---------- | ---------------- |
-| Autor / mantenedor | Eliu Salvador Pérez Tantaleán |
-| Otros roles (PM, revisores, rotación) | **TBD** |
+
+| Rol / área                            | Contacto / notas              |
+| ------------------------------------- | ----------------------------- |
+| Autor / mantenedor                    | Eliu Salvador Pérez Tantaleán |
+| Otros roles (PM, revisores, rotación) | **TBD**                       |
+
 
 ---
 
@@ -93,15 +97,17 @@ Roadmap de producto a alto nivel: **TBD** (p.ej. enlace a Confluence o épica cu
 
 ## Enlaces relevantes
 
-| Recurso | Descripción |
-| ------- | ----------- |
-| [Repositorio GitHub](https://github.com/2310-dot/vet-es) | Código fuente |
-| [CLAUDE.md](CLAUDE.md) | Guía para asistentes de código en el repo |
-| [docs/event-storming-workflow.md](docs/event-storming-workflow.md) | Flujo de reserva y reglas de capacidad |
-| [docs/pre-operative-considerations.md](docs/pre-operative-considerations.md) | Consideraciones preoperatorias (ES) |
-| [docs/jira/](docs/jira/) | Exports de tickets enriquecidos (ejemplos) |
-| [.cursor/commands/implement.md](.cursor/commands/implement.md) | Flujo ticket Jira → PR |
-| [.cursor/commands/enrich.md](.cursor/commands/enrich.md) | Flujo de enriquecimiento de tickets |
+
+| Recurso                                                                      | Descripción                                |
+| ---------------------------------------------------------------------------- | ------------------------------------------ |
+| [Repositorio GitHub](https://github.com/2310-dot/vet-es)                     | Código fuente                              |
+| [CLAUDE.md](CLAUDE.md)                                                       | Guía para asistentes de código en el repo  |
+| [docs/event-storming-workflow.md](docs/event-storming-workflow.md)           | Flujo de reserva y reglas de capacidad     |
+| [docs/pre-operative-considerations.md](docs/pre-operative-considerations.md) | Consideraciones preoperatorias (ES)        |
+| [docs/jira/](docs/jira/)                                                     | Exports de tickets enriquecidos (ejemplos) |
+| [.cursor/commands/implement.md](.cursor/commands/implement.md)               | Flujo ticket Jira → PR                     |
+| [.cursor/commands/enrich.md](.cursor/commands/enrich.md)                     | Flujo de enriquecimiento de tickets        |
+
 
 ---
 
@@ -121,11 +127,13 @@ Flujo principal de conversación a cita confirmada:
 
 La carpeta `docs/` es la fuente de verdad para reglas de negocio y mensajería.
 
-| Documento | Uso |
-| --------- | --- |
-| `docs/pre-operative-considerations.md` | Alcance de clínica, ayuno, transporte, alta (ES). |
-| Reglas de negocio / agenda | En `docs/` cuando existan (p. ej. cuotas, límites). |
-| `docs/jira/` | Tickets enriquecidos y ejemplos before/after. |
+
+| Documento                              | Uso                                                 |
+| -------------------------------------- | --------------------------------------------------- |
+| `docs/pre-operative-considerations.md` | Alcance de clínica, ayuno, transporte, alta (ES).   |
+| Reglas de negocio / agenda             | En `docs/` cuando existan (p. ej. cuotas, límites). |
+| `docs/jira/`                           | Tickets enriquecidos y ejemplos before/after.       |
+
 
 Si añades documentos nuevos, enlázalos en **Enlaces relevantes** o en esta tabla.
 
@@ -168,3 +176,4 @@ Respuesta esperada (stub):
 
 - **Implementar ticket Jira:** p. ej. *"Implement VE-12"* — lee el ticket, planifica según AC, desarrolla, mueve estados y abre PR. Detalle: [.cursor/commands/implement.md](.cursor/commands/implement.md).
 - **Enriquecer ticket:** *"Enrich VE-1"* o `/enrich` — refina criterios y alcance con el agente PM; publicar en Jira requiere tu aprobación. Detalle: [.cursor/commands/enrich.md](.cursor/commands/enrich.md).
+

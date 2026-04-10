@@ -2,9 +2,36 @@
 venv/
 __pycache__/
 *.py[cod]
+*.pyc
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 *.egg-info/
 dist/
 build/
+
+# Environment variables and local secrets
+.env
+.env.local
+.env.*.local
+.envrc
+
+# JavaScript / frontend
+node_modules/
+
+# Deployment / platform
+.vercel/
+
+# Common secret files
+secrets.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+credentials.json
+service-account*.json

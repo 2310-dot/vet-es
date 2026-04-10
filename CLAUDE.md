@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Veterinary clinic chatbot and booking assistant (ENAE case study). A Python/LangChain/FastAPI backend that handles appointment scheduling, FAQs, and internal protocol queries for a vet clinic. The bot does not diagnose or prescribe -- it supports scheduling, FAQs, and internal procedures, citing tools or retrieved documents only.
 
-**GitHub repo**: https://github.com/kuuli/enae-vet-es
+**GitHub repo**: 
 
 ## Tech Stack
 
