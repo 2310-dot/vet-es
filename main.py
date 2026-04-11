@@ -1,20 +1,46 @@
-"""Chatbot v4 placeholder API: GET / (HTML), GET /health, POST /chat (JSON), POST /ask_bot (urlencoded)."""
+"""Chatbot v4 placeholder API: GET / (HTML chat demo), GET /health, POST /chat (JSON)."""
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from urllib.parse import parse_qs
 
 from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 app = FastAPI(
     title="Chatbot v4",
     version="0.1.0",
     description=(
-        "Placeholder API for clinic chatbot: HTML home, JSON /chat, "
+        "Placeholder API for clinic chatbot: HTML chat demo on /, JSON /chat, "
         "form-based /ask_bot, and /health liveness."
     ),
 )
+
+
+def _maybe_add_cors(application: FastAPI) -> None:
+    """Enable CORS when CORS_ALLOW_ORIGINS is set (comma-separated origins)."""
+    raw = os.environ.get("CORS_ALLOW_ORIGINS", "").strip()
+    if not raw:
+        return
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
+    if not origins:
+        return
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["*"],
+    )
+
+
+_maybe_add_cors(app)
 
 
 class HealthResponse(BaseModel):
@@ -54,13 +80,15 @@ class AskBotResponse(BaseModel):
     responses={200: {"content": {"text/html": {}}}},
 )
 async def home() -> Response:
-    html = (
-        "<!DOCTYPE html>"
-        "<html><head><title>Chatbot v4</title></head>"
-        "<body><h1>Chatbot v4 Placeholder</h1>"
-        "<p>This route is reserved for a future visual chat UI.</p>"
-        "</body></html>"
-    )
+    """Serve minimal HTML+JS chat demo (VE-19)."""
+    html_path = STATIC_DIR / "chat.html"
+    if not html_path.is_file():
+        fallback = (
+            "<!DOCTYPE html><html><head><title>Chatbot v4</title></head>"
+            "<body><h1>Chatbot v4</h1><p>static/chat.html is missing.</p></body></html>"
+        )
+        return Response(content=fallback, media_type="text/html")
+    html = html_path.read_text(encoding="utf-8")
     return Response(content=html, media_type="text/html")
 
 
@@ -134,3 +162,11 @@ async def ask_bot(request: Request) -> AskBotResponse:
         fields.get("session_id"),
     )
     return AskBotResponse(msg=msg, session_id=session_id, placeholder=True)
+
+
+if STATIC_DIR.is_dir():
+    app.mount(
+        "/static",
+        StaticFiles(directory=str(STATIC_DIR)),
+        name="static",
+    )

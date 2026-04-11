@@ -67,6 +67,8 @@ python -m uvicorn main:app --reload
 - OpenAPI: [http://127.0.0.1:8000/openapi.json](http://127.0.0.1:8000/openapi.json)
 - API rápida: `GET /health` (JSON), `POST /chat` (cuerpo JSON `msg` + `session_id`), legado `POST /ask_bot` (form urlencoded).
 
+**Demo de chat en el navegador (VE-19):** con la API en marcha, abre [http://127.0.0.1:8000/](http://127.0.0.1:8000/). Escribe un mensaje y pulsa Send; la UI llama a `POST /chat` en el mismo origen. Para apuntar a otro despliegue, edita **solo** `static/chat_config.js` (`window.CHATBOT_API_BASE`). Si el HTML se sirve desde otro origen que la API, define `CORS_ALLOW_ORIGINS` en el entorno (lista separada por comas; ver `.env.example`) y reinicia el servidor.
+
 **Tests (opcional):** con el venv activo, `python -m pip install -r requirements-dev.txt` si aplica, luego `pytest`.
 
 ---
