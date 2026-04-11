@@ -75,10 +75,11 @@ python -m uvicorn main:app --reload
 
 ## Variables de entorno
 
-El API placeholder actual **no requiere** variables de entorno para arrancar en local.
+- **`OPENAI_API_KEY`**: obligatoria para que `POST /chat` y `POST /ask_bot` llamen al modelo. Sin ella, esas rutas responden **503** con un mensaje claro (no se usa clave en el repo; ver `.env.example`).
+- **`OPENAI_CHAT_MODEL`** (opcional): modelo de chat OpenAI; por defecto `gpt-4o-mini` en `llm_service.py`.
+- El **system prompt** base del asistente está en **`prompt.md`** en la raíz del repo (misma carpeta que `main.py`); el backend lo carga desde disco.
 
-- Plantilla `.env` / `.env.example` para integraciones (LLM, Jira, bases de datos): **TBD**
-- Cuando existan claves o URLs obligatorias, documentarlas aquí y en el código de arranque.
+Otras variables (CORS, puerto, RAG, etc.) siguen en `.env.example`.
 
 ---
 

@@ -1,4 +1,4 @@
-"""Chatbot v4 placeholder API: GET / (HTML chat demo), GET /health, POST /chat (JSON)."""
+"""Clinic chatbot API: GET / (HTML demo), GET /health, POST /chat (JSON), POST /ask_bot."""
 
 from __future__ import annotations
 
@@ -11,14 +11,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
+from llm_service import (
+    LlmConfigurationError,
+    LlmUpstreamError,
+    invoke_chat_llm,
+)
+
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 app = FastAPI(
     title="Chatbot v4",
     version="0.1.0",
     description=(
-        "Placeholder API for clinic chatbot: HTML chat demo on /, JSON /chat, "
-        "form-based /ask_bot, and /health liveness."
+        "Clinic chatbot API: HTML demo on /, JSON POST /chat, "
+        "form POST /ask_bot (LangChain + OpenAI via llm_service), GET /health."
     ),
 )
 
@@ -66,11 +72,17 @@ class ChatRequest(BaseModel):
 
 
 class AskBotResponse(BaseModel):
-    """Stub response for POST /ask_bot until LangChain is added."""
+    """Assistant reply for POST /chat and POST /ask_bot."""
 
-    msg: str = Field(examples=["hello"])
+    msg: str = Field(
+        description="Assistant reply text.",
+        examples=["We are open Monday–Friday 9–18. How can I help?"],
+    )
     session_id: str = Field(examples=["s1"])
-    placeholder: bool = True
+    placeholder: bool = Field(
+        default=False,
+        description="Reserved for stub responses; false when the LLM produced msg.",
+    )
 
 
 @app.get(
@@ -102,18 +114,25 @@ async def health() -> HealthResponse:
     return HealthResponse(status="ok")
 
 
+async def _assistant_reply(user_text: str, session_id: str) -> AskBotResponse:
+    """Call the central LLM entrypoint and map errors to HTTP responses."""
+    try:
+        reply = await invoke_chat_llm(user_text)
+    except LlmConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except LlmUpstreamError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return AskBotResponse(msg=reply, session_id=session_id, placeholder=False)
+
+
 @app.post(
     "/chat",
     summary="Chat",
     response_model=AskBotResponse,
 )
 async def chat(body: ChatRequest) -> AskBotResponse:
-    """JSON chat placeholder: echoes validated message until LangChain is wired."""
-    return AskBotResponse(
-        msg=body.msg,
-        session_id=body.session_id,
-        placeholder=True,
-    )
+    """JSON chat: delegates to :func:`llm_service.invoke_chat_llm`."""
+    return await _assistant_reply(body.msg, body.session_id)
 
 
 def _parse_urlencoded_body(body_bytes: bytes) -> dict[str, str]:
@@ -161,7 +180,7 @@ async def ask_bot(request: Request) -> AskBotResponse:
         fields.get("msg"),
         fields.get("session_id"),
     )
-    return AskBotResponse(msg=msg, session_id=session_id, placeholder=True)
+    return await _assistant_reply(msg, session_id)
 
 
 if STATIC_DIR.is_dir():
