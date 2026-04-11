@@ -1,11 +1,15 @@
-"""Tests for main.py: Chatbot v4 placeholder API (VETES-16, VE-18, VE-19, VE-21)."""
+"""Tests for main.py: FastAPI chatbot API (VE-18, VE-19, VE-20, VE-21)."""
 
 from __future__ import annotations
+
+import asyncio
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from conversation_memory import reset_chat_memory_for_tests, session_messages_copy
+from llm_service import LlmUpstreamError
 from main import app
 
 
@@ -29,16 +33,51 @@ def test_get_health_ok(client: TestClient) -> None:
 
 
 def test_post_chat_json_ok(client: TestClient) -> None:
-    resp = client.post(
-        "/chat",
-        json={"msg": "  hello  ", "session_id": "s1"},
-    )
+    with patch("main.invoke_chat_llm", new_callable=AsyncMock) as mock_llm:
+        mock_llm.return_value = "assistant reply"
+        resp = client.post(
+            "/chat",
+            json={"msg": "  hello  ", "session_id": "s1"},
+        )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["msg"] == "hello"
+    assert data["msg"] == "assistant reply"
     assert data["session_id"] == "s1"
-    assert data["placeholder"] is True
+    assert data["placeholder"] is False
     assert data["turn_count"] == 1
+    mock_llm.assert_awaited_once()
+    assert mock_llm.await_args.args[0] == "hello"
+
+
+def test_post_chat_invokes_central_llm_function(client: TestClient) -> None:
+    with patch("main.invoke_chat_llm", new_callable=AsyncMock) as mock_llm:
+        mock_llm.return_value = "ok"
+        client.post(
+            "/chat",
+            json={"msg": "user text", "session_id": "sid"},
+        )
+    mock_llm.assert_awaited_once_with("user text")
+
+
+def test_post_chat_missing_openai_key_503(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    resp = client.post(
+        "/chat",
+        json={"msg": "hello", "session_id": "s1"},
+    )
+    assert resp.status_code == 503
+    assert "OPENAI_API_KEY" in resp.json()["detail"]
+
+
+def test_post_chat_upstream_error_502(client: TestClient) -> None:
+    with patch("main.invoke_chat_llm", new_callable=AsyncMock) as mock_llm:
+        mock_llm.side_effect = LlmUpstreamError("upstream down")
+        resp = client.post(
+            "/chat",
+            json={"msg": "hello", "session_id": "s1"},
+        )
+    assert resp.status_code == 502
+    assert resp.json()["detail"] == "upstream down"
 
 
 def test_post_chat_empty_msg_422(client: TestClient) -> None:
@@ -82,17 +121,20 @@ def test_get_static_chat_js(client: TestClient) -> None:
 
 
 def test_post_ask_bot_urlencoded_ok(client: TestClient) -> None:
-    resp = client.post(
-        "/ask_bot",
-        content=b"msg=hello&session_id=s1",
-        headers={"content-type": "application/x-www-form-urlencoded"},
-    )
+    with patch("main.invoke_chat_llm", new_callable=AsyncMock) as mock_llm:
+        mock_llm.return_value = "form assistant reply"
+        resp = client.post(
+            "/ask_bot",
+            content=b"msg=hello&session_id=s1",
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["msg"] == "hello"
+    assert data["msg"] == "form assistant reply"
     assert data["session_id"] == "s1"
-    assert data["placeholder"] is True
+    assert data["placeholder"] is False
     assert data["turn_count"] == 1
+    mock_llm.assert_awaited_once_with("hello")
 
 
 def test_post_ask_bot_missing_msg(client: TestClient) -> None:
@@ -158,20 +200,24 @@ def test_openapi_json_contains_paths(client: TestClient) -> None:
     assert post_ask.get("summary") == "Ask Bot"
 
 
+# ---------- VE-21: session memory tests ----------
+
 def test_session_memory_isolation(client: TestClient) -> None:
-    r1 = client.post("/chat", json={"msg": "a", "session_id": "alpha"})
-    r2 = client.post("/chat", json={"msg": "b", "session_id": "beta"})
+    with patch("main.invoke_chat_llm", new_callable=AsyncMock) as mock_llm:
+        mock_llm.side_effect = ["a", "b"]
+        r1 = client.post("/chat", json={"msg": "a", "session_id": "alpha"})
+        r2 = client.post("/chat", json={"msg": "b", "session_id": "beta"})
     assert r1.json()["turn_count"] == 1
     assert r2.json()["turn_count"] == 1
-    alpha = session_messages_copy("alpha")
-    beta = session_messages_copy("beta")
-    assert alpha == [("user", "a"), ("assistant", "a")]
-    assert beta == [("user", "b"), ("assistant", "b")]
+    assert session_messages_copy("alpha") == [("user", "a"), ("assistant", "a")]
+    assert session_messages_copy("beta") == [("user", "b"), ("assistant", "b")]
 
 
 def test_session_memory_continuity(client: TestClient) -> None:
-    first = client.post("/chat", json={"msg": "one", "session_id": "s-cont"})
-    second = client.post("/chat", json={"msg": "two", "session_id": "s-cont"})
+    with patch("main.invoke_chat_llm", new_callable=AsyncMock) as mock_llm:
+        mock_llm.side_effect = ["one", "two"]
+        first = client.post("/chat", json={"msg": "one", "session_id": "s-cont"})
+        second = client.post("/chat", json={"msg": "two", "session_id": "s-cont"})
     assert first.json()["turn_count"] == 1
     assert second.json()["turn_count"] == 2
     assert session_messages_copy("s-cont") == [
@@ -183,13 +229,15 @@ def test_session_memory_continuity(client: TestClient) -> None:
 
 
 def test_session_memory_cross_endpoint_parity(client: TestClient) -> None:
-    r_chat = client.post("/chat", json={"msg": "from_json", "session_id": "s-par"})
-    assert r_chat.json()["turn_count"] == 1
-    r_form = client.post(
-        "/ask_bot",
-        content=b"msg=from_form&session_id=s-par",
-        headers={"content-type": "application/x-www-form-urlencoded"},
-    )
+    with patch("main.invoke_chat_llm", new_callable=AsyncMock) as mock_llm:
+        mock_llm.side_effect = ["from_json", "from_form"]
+        r_chat = client.post("/chat", json={"msg": "from_json", "session_id": "s-par"})
+        assert r_chat.json()["turn_count"] == 1
+        r_form = client.post(
+            "/ask_bot",
+            content=b"msg=from_form&session_id=s-par",
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
     assert r_form.json()["turn_count"] == 2
     assert session_messages_copy("s-par") == [
         ("user", "from_json"),
@@ -203,8 +251,10 @@ def test_chat_memory_max_turns_trims(
     monkeypatch: pytest.MonkeyPatch, client: TestClient
 ) -> None:
     monkeypatch.setenv("CHAT_MEMORY_MAX_TURNS", "2")
-    for i in range(3):
-        client.post("/chat", json={"msg": str(i), "session_id": "s-max"})
+    with patch("main.invoke_chat_llm", new_callable=AsyncMock) as mock_llm:
+        mock_llm.side_effect = ["0", "1", "2"]
+        for i in range(3):
+            client.post("/chat", json={"msg": str(i), "session_id": "s-max"})
     assert session_messages_copy("s-max") == [
         ("user", "1"),
         ("assistant", "1"),
@@ -214,50 +264,88 @@ def test_chat_memory_max_turns_trims(
 
 
 def test_session_memory_case_sensitive_keys(client: TestClient) -> None:
-    client.post("/chat", json={"msg": "x", "session_id": "Sid"})
-    client.post("/chat", json={"msg": "y", "session_id": "sid"})
+    with patch("main.invoke_chat_llm", new_callable=AsyncMock) as mock_llm:
+        mock_llm.side_effect = ["x", "y"]
+        client.post("/chat", json={"msg": "x", "session_id": "Sid"})
+        client.post("/chat", json={"msg": "y", "session_id": "sid"})
     assert session_messages_copy("Sid") == [("user", "x"), ("assistant", "x")]
     assert session_messages_copy("sid") == [("user", "y"), ("assistant", "y")]
 
 
 def test_invalid_chat_does_not_write_session_memory(client: TestClient) -> None:
-    client.post("/chat", json={"msg": "ok", "session_id": "s-inv"})
-    bad = client.post("/chat", json={"msg": "   ", "session_id": "s-inv"})
-    assert bad.status_code == 422
-    assert session_messages_copy("s-inv") == [
-        ("user", "ok"),
-        ("assistant", "ok"),
-    ]
+    with patch("main.invoke_chat_llm", new_callable=AsyncMock) as mock_llm:
+        mock_llm.return_value = "ok"
+        client.post("/chat", json={"msg": "ok", "session_id": "s-inv"})
+        bad = client.post("/chat", json={"msg": "   ", "session_id": "s-inv"})
+        assert bad.status_code == 422
+        assert session_messages_copy("s-inv") == [
+            ("user", "ok"),
+            ("assistant", "ok"),
+        ]
 
-    bad_ct = client.post(
-        "/chat",
-        content=b"msg=hello&session_id=s-inv",
-        headers={"content-type": "application/x-www-form-urlencoded"},
-    )
-    assert bad_ct.status_code == 422
-    assert len(session_messages_copy("s-inv")) == 2
+        bad_ct = client.post(
+            "/chat",
+            content=b"msg=hello&session_id=s-inv",
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
+        assert bad_ct.status_code == 422
+        assert len(session_messages_copy("s-inv")) == 2
 
 
 def test_invalid_ask_bot_does_not_write_session_memory(client: TestClient) -> None:
-    client.post(
-        "/ask_bot",
-        content=b"msg=ok&session_id=s-ab",
-        headers={"content-type": "application/x-www-form-urlencoded"},
-    )
-    bad415 = client.post(
-        "/ask_bot",
-        json={"msg": "nope", "session_id": "s-ab"},
-    )
-    assert bad415.status_code == 415
-    assert session_messages_copy("s-ab") == [
-        ("user", "ok"),
-        ("assistant", "ok"),
-    ]
+    with patch("main.invoke_chat_llm", new_callable=AsyncMock) as mock_llm:
+        mock_llm.return_value = "ok"
+        client.post(
+            "/ask_bot",
+            content=b"msg=ok&session_id=s-ab",
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
+        bad415 = client.post(
+            "/ask_bot",
+            json={"msg": "nope", "session_id": "s-ab"},
+        )
+        assert bad415.status_code == 415
+        assert session_messages_copy("s-ab") == [
+            ("user", "ok"),
+            ("assistant", "ok"),
+        ]
 
-    bad422 = client.post(
-        "/ask_bot",
-        content=b"",
-        headers={"content-type": "application/x-www-form-urlencoded"},
-    )
-    assert bad422.status_code == 422
-    assert len(session_messages_copy("s-ab")) == 2
+        bad422 = client.post(
+            "/ask_bot",
+            content=b"",
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
+        assert bad422.status_code == 422
+        assert len(session_messages_copy("s-ab")) == 2
+
+
+# ---------- VE-20: system prompt loading ----------
+
+def test_invoke_chat_llm_uses_system_prompt_from_file() -> None:
+    """Outbound messages include system text loaded from prompt.md (VE-20 AC7)."""
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+    import llm_service
+    from llm_service import invoke_chat_llm
+
+    system_text = llm_service.load_system_prompt()
+    assert "must not diagnose" in system_text.lower()
+
+    captured: list = []
+
+    async def fake_ainvoke(messages):
+        captured.extend(messages)
+        return AIMessage(content="stub")
+
+    with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test-key"}):
+        with patch("llm_service.ChatOpenAI") as mock_cls:
+            instance = mock_cls.return_value
+            instance.ainvoke = fake_ainvoke
+            result = asyncio.run(invoke_chat_llm("user question"))
+
+    assert result == "stub"
+    assert len(captured) == 2
+    assert isinstance(captured[0], SystemMessage)
+    assert captured[0].content == system_text
+    assert isinstance(captured[1], HumanMessage)
+    assert captured[1].content == "user question"
