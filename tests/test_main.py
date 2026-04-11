@@ -1,10 +1,14 @@
-"""Tests for main.py: Chatbot v4 placeholder API (VETES-16, VE-18, VE-19)."""
+"""Tests for main.py: FastAPI chatbot API (VE-18, VE-19, VE-20)."""
 
 from __future__ import annotations
+
+import asyncio
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
+from llm_service import LlmUpstreamError
 from main import app
 
 
@@ -20,15 +24,50 @@ def test_get_health_ok(client: TestClient) -> None:
 
 
 def test_post_chat_json_ok(client: TestClient) -> None:
-    resp = client.post(
-        "/chat",
-        json={"msg": "  hello  ", "session_id": "s1"},
-    )
+    with patch("main.invoke_chat_llm", new_callable=AsyncMock) as mock_llm:
+        mock_llm.return_value = "assistant reply"
+        resp = client.post(
+            "/chat",
+            json={"msg": "  hello  ", "session_id": "s1"},
+        )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["msg"] == "hello"
+    assert data["msg"] == "assistant reply"
     assert data["session_id"] == "s1"
-    assert data["placeholder"] is True
+    assert data["placeholder"] is False
+    mock_llm.assert_awaited_once()
+    assert mock_llm.await_args.args[0] == "hello"
+
+
+def test_post_chat_invokes_central_llm_function(client: TestClient) -> None:
+    with patch("main.invoke_chat_llm", new_callable=AsyncMock) as mock_llm:
+        mock_llm.return_value = "ok"
+        client.post(
+            "/chat",
+            json={"msg": "user text", "session_id": "sid"},
+        )
+    mock_llm.assert_awaited_once_with("user text")
+
+
+def test_post_chat_missing_openai_key_503(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    resp = client.post(
+        "/chat",
+        json={"msg": "hello", "session_id": "s1"},
+    )
+    assert resp.status_code == 503
+    assert "OPENAI_API_KEY" in resp.json()["detail"]
+
+
+def test_post_chat_upstream_error_502(client: TestClient) -> None:
+    with patch("main.invoke_chat_llm", new_callable=AsyncMock) as mock_llm:
+        mock_llm.side_effect = LlmUpstreamError("upstream down")
+        resp = client.post(
+            "/chat",
+            json={"msg": "hello", "session_id": "s1"},
+        )
+    assert resp.status_code == 502
+    assert resp.json()["detail"] == "upstream down"
 
 
 def test_post_chat_empty_msg_422(client: TestClient) -> None:
@@ -72,16 +111,19 @@ def test_get_static_chat_js(client: TestClient) -> None:
 
 
 def test_post_ask_bot_urlencoded_ok(client: TestClient) -> None:
-    resp = client.post(
-        "/ask_bot",
-        content=b"msg=hello&session_id=s1",
-        headers={"content-type": "application/x-www-form-urlencoded"},
-    )
+    with patch("main.invoke_chat_llm", new_callable=AsyncMock) as mock_llm:
+        mock_llm.return_value = "form assistant reply"
+        resp = client.post(
+            "/ask_bot",
+            content=b"msg=hello&session_id=s1",
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["msg"] == "hello"
+    assert data["msg"] == "form assistant reply"
     assert data["session_id"] == "s1"
-    assert data["placeholder"] is True
+    assert data["placeholder"] is False
+    mock_llm.assert_awaited_once_with("hello")
 
 
 def test_post_ask_bot_missing_msg(client: TestClient) -> None:
@@ -145,3 +187,33 @@ def test_openapi_json_contains_paths(client: TestClient) -> None:
     assert post_chat.get("summary") == "Chat"
     post_ask = paths["/ask_bot"].get("post", {})
     assert post_ask.get("summary") == "Ask Bot"
+
+
+def test_invoke_chat_llm_uses_system_prompt_from_file() -> None:
+    """Outbound messages include system text loaded from prompt.md (VE-20 AC7)."""
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+    import llm_service
+    from llm_service import invoke_chat_llm
+
+    system_text = llm_service.load_system_prompt()
+    assert "must not diagnose" in system_text.lower()
+
+    captured: list = []
+
+    async def fake_ainvoke(messages):
+        captured.extend(messages)
+        return AIMessage(content="stub")
+
+    with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test-key"}):
+        with patch("llm_service.ChatOpenAI") as mock_cls:
+            instance = mock_cls.return_value
+            instance.ainvoke = fake_ainvoke
+            result = asyncio.run(invoke_chat_llm("user question"))
+
+    assert result == "stub"
+    assert len(captured) == 2
+    assert isinstance(captured[0], SystemMessage)
+    assert captured[0].content == system_text
+    assert isinstance(captured[1], HumanMessage)
+    assert captured[1].content == "user question"
