@@ -60,7 +60,7 @@ Use this workflow when the user asks to **implement** a Jira ticket (e.g. "imple
 
 ## Phase 6: Create a PR with a good description
 
-1. Create a branch from the default branch (e.g. `main`/`master`), name it by ticket and short slug (e.g. `PROJ-123-add-patient-lookup-tool`).
+1. Create a branch from the main branch (e.g. `main`/`master`), name it by ticket and short slug (e.g. `PROJ-123-add-patient-lookup-tool`).
 2. Commit changes with a message that references the ticket (e.g. `PROJ-123: Add patient lookup tool and tests`).
 3. Push the branch and open a **Pull Request** (via Git + GitHub MCP or `gh` CLI if available).
 4. **PR description** must include:
