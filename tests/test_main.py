@@ -1,4 +1,4 @@
-"""Tests for main.py: Chatbot v4 placeholder API (VETES-16, VE-18)."""
+"""Tests for main.py: Chatbot v4 placeholder API (VETES-16, VE-18, VE-19)."""
 
 from __future__ import annotations
 
@@ -55,6 +55,20 @@ def test_get_home_returns_html(client: TestClient) -> None:
     html_body = resp.text
     assert html_body.strip()
     assert "chatbot" in html_body.lower()
+    assert 'data-testid="chat-log"' in html_body
+    assert "/static/chat_config.js" in html_body
+
+
+def test_get_static_chat_config(client: TestClient) -> None:
+    resp = client.get("/static/chat_config.js")
+    assert resp.status_code == 200
+    assert "CHATBOT_API_BASE" in resp.text
+
+
+def test_get_static_chat_js(client: TestClient) -> None:
+    resp = client.get("/static/chat.js")
+    assert resp.status_code == 200
+    assert "fetch" in resp.text
 
 
 def test_post_ask_bot_urlencoded_ok(client: TestClient) -> None:

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chatbot v4 — demo</title>
+    <link rel="stylesheet" href="/static/chat.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Chatbot v4 demo</h1>
+      <p class="api-hint">
+        API base: <code id="api-base-display"></code>
+      </p>
+      <div id="error-banner" class="error-banner" hidden></div>
+      <div
+        id="chat-log"
+        class="chat-log"
+        data-testid="chat-log"
+        aria-live="polite"
+      ></div>
+      <form id="chat-form" data-testid="chat-form">
+        <label for="msg-input">Message</label>
+        <input
+          type="text"
+          id="msg-input"
+          name="msg"
+          autocomplete="off"
+          data-testid="msg-input"
+        />
+        <button type="submit" data-testid="send-btn">Send</button>
+      </form>
+    </main>
+    <script src="/static/chat_config.js"></script>
+    <script src="/static/chat.js"></script>
+  </body>
+</html>
