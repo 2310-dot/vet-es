@@ -65,6 +65,7 @@ python -m uvicorn main:app --reload
 
 - Documentación interactiva: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 - OpenAPI: [http://127.0.0.1:8000/openapi.json](http://127.0.0.1:8000/openapi.json)
+- API rápida: `GET /health` (JSON), `POST /chat` (cuerpo JSON `msg` + `session_id`), legado `POST /ask_bot` (form urlencoded).
 
 **Tests (opcional):** con el venv activo, `python -m pip install -r requirements-dev.txt` si aplica, luego `pytest`.
 

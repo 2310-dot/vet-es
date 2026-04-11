@@ -1,19 +1,42 @@
-"""Chatbot v4 placeholder API (VETES-16): GET / (HTML) and POST /ask_bot (urlencoded)."""
+"""Chatbot v4 placeholder API: GET / (HTML), GET /health, POST /chat (JSON), POST /ask_bot (urlencoded)."""
 
 from __future__ import annotations
 
-import json
-from typing import Any
 from urllib.parse import parse_qs
 
 from fastapi import FastAPI, HTTPException, Request, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 app = FastAPI(
     title="Chatbot v4",
     version="0.1.0",
-    description="Placeholder API for clinic chatbot: HTML home + form-based ask endpoint.",
+    description=(
+        "Placeholder API for clinic chatbot: HTML home, JSON /chat, "
+        "form-based /ask_bot, and /health liveness."
+    ),
 )
+
+
+class HealthResponse(BaseModel):
+    """JSON body for GET /health."""
+
+    status: str = Field(examples=["ok"])
+
+
+class ChatRequest(BaseModel):
+    """JSON body for POST /chat."""
+
+    msg: str = Field(examples=["hello"])
+    session_id: str = Field(examples=["s1"])
+
+    @field_validator("msg", "session_id")
+    @classmethod
+    def strip_and_require_non_empty(cls, value: str) -> str:
+        """Strip whitespace; reject empty or whitespace-only strings."""
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("must not be empty or whitespace-only")
+        return cleaned
 
 
 class AskBotResponse(BaseModel):
@@ -39,6 +62,30 @@ async def home() -> Response:
         "</body></html>"
     )
     return Response(content=html, media_type="text/html")
+
+
+@app.get(
+    "/health",
+    summary="Health",
+    response_model=HealthResponse,
+)
+async def health() -> HealthResponse:
+    """Liveness check for load balancers and monitoring."""
+    return HealthResponse(status="ok")
+
+
+@app.post(
+    "/chat",
+    summary="Chat",
+    response_model=AskBotResponse,
+)
+async def chat(body: ChatRequest) -> AskBotResponse:
+    """JSON chat placeholder: echoes validated message until LangChain is wired."""
+    return AskBotResponse(
+        msg=body.msg,
+        session_id=body.session_id,
+        placeholder=True,
+    )
 
 
 def _parse_urlencoded_body(body_bytes: bytes) -> dict[str, str]:

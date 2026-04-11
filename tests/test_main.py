@@ -1,4 +1,4 @@
-"""Tests for main.py (VETES-16): Chatbot v4 placeholder API."""
+"""Tests for main.py: Chatbot v4 placeholder API (VETES-16, VE-18)."""
 
 from __future__ import annotations
 
@@ -11,6 +11,41 @@ from main import app
 @pytest.fixture
 def client() -> TestClient:
     return TestClient(app)
+
+
+def test_get_health_ok(client: TestClient) -> None:
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok"}
+
+
+def test_post_chat_json_ok(client: TestClient) -> None:
+    resp = client.post(
+        "/chat",
+        json={"msg": "  hello  ", "session_id": "s1"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["msg"] == "hello"
+    assert data["session_id"] == "s1"
+    assert data["placeholder"] is True
+
+
+def test_post_chat_empty_msg_422(client: TestClient) -> None:
+    resp = client.post(
+        "/chat",
+        json={"msg": "   ", "session_id": "s1"},
+    )
+    assert resp.status_code == 422
+
+
+def test_post_chat_urlencoded_expects_422(client: TestClient) -> None:
+    resp = client.post(
+        "/chat",
+        content=b"msg=hello&session_id=s1",
+        headers={"content-type": "application/x-www-form-urlencoded"},
+    )
+    assert resp.status_code == 422
 
 
 def test_get_home_returns_html(client: TestClient) -> None:
@@ -85,8 +120,14 @@ def test_openapi_json_contains_paths(client: TestClient) -> None:
     openapi = resp.json()
     paths = openapi.get("paths", {})
     assert "/" in paths
+    assert "/health" in paths
+    assert "/chat" in paths
     assert "/ask_bot" in paths
     get_home = paths["/"].get("get", {})
     assert get_home.get("summary") == "Home"
+    get_health = paths["/health"].get("get", {})
+    assert get_health.get("summary") == "Health"
+    post_chat = paths["/chat"].get("post", {})
+    assert post_chat.get("summary") == "Chat"
     post_ask = paths["/ask_bot"].get("post", {})
     assert post_ask.get("summary") == "Ask Bot"
