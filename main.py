@@ -11,6 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
+from conversation_memory import record_exchange
+
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 app = FastAPI(
@@ -71,6 +73,11 @@ class AskBotResponse(BaseModel):
     msg: str = Field(examples=["hello"])
     session_id: str = Field(examples=["s1"])
     placeholder: bool = True
+    turn_count: int = Field(
+        ge=1,
+        description="Completed user→assistant pairs stored for this session after this request.",
+        examples=[1],
+    )
 
 
 @app.get(
@@ -109,10 +116,12 @@ async def health() -> HealthResponse:
 )
 async def chat(body: ChatRequest) -> AskBotResponse:
     """JSON chat placeholder: echoes validated message until LangChain is wired."""
+    turn_count = record_exchange(body.session_id, body.msg, body.msg)
     return AskBotResponse(
         msg=body.msg,
         session_id=body.session_id,
         placeholder=True,
+        turn_count=turn_count,
     )
 
 
@@ -161,7 +170,13 @@ async def ask_bot(request: Request) -> AskBotResponse:
         fields.get("msg"),
         fields.get("session_id"),
     )
-    return AskBotResponse(msg=msg, session_id=session_id, placeholder=True)
+    turn_count = record_exchange(session_id, msg, msg)
+    return AskBotResponse(
+        msg=msg,
+        session_id=session_id,
+        placeholder=True,
+        turn_count=turn_count,
+    )
 
 
 if STATIC_DIR.is_dir():

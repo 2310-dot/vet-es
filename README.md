@@ -75,10 +75,20 @@ python -m uvicorn main:app --reload
 
 ## Variables de entorno
 
-El API placeholder actual **no requiere** variables de entorno para arrancar en local.
+Opcionales: el API arranca sin `.env`. Ver `.env.example` (OpenAI, CORS, RAG, memoria de chat).
 
-- Plantilla `.env` / `.env.example` para integraciones (LLM, Jira, bases de datos): **TBD**
-- Cuando existan claves o URLs obligatorias, documentarlas aquí y en el código de arranque.
+### Session memory (VE-21) — English
+
+In-process conversation store keyed by **trimmed** `session_id` (**case-sensitive**; `"A"` and `"a"` are different). `POST /chat` and `POST /ask_bot` share this store. Data is **not** persisted: a process restart clears everything.
+
+| Variable | Default | Meaning |
+| -------- | ------- | ------- |
+| `CHAT_MEMORY_MAX_TURNS` | `50` | Max stored **user→assistant pairs** per session; oldest pairs dropped. |
+| `CHAT_MEMORY_TTL_SECONDS` | `0` | If `0`, TTL is off (entries last until restart). If positive, a session with no activity for that many seconds (monotonic clock) is treated as empty on the next access. |
+
+Concurrency: a single **`threading.Lock`** protects the store. Concurrent requests for the same session are serialized; under the lock, updates apply in order (**last write wins** for the stored transcript state after each completed handler).
+
+Validation failures (`422` / `415` on `/chat` or `/ask_bot`) do **not** append to memory.
 
 ---
 
@@ -170,8 +180,10 @@ curl -X POST http://127.0.0.1:8000/ask_bot \
 Respuesta esperada (stub):
 
 ```json
-{"msg": "hello", "session_id": "s1", "placeholder": true}
+{"msg": "hello", "session_id": "s1", "placeholder": true, "turn_count": 1}
 ```
+
+`turn_count` is the number of completed user→assistant pairs stored for that `session_id` after the request (placeholder bot echoes the user message as the assistant line).
 
 ---
 
