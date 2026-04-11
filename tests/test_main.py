@@ -56,7 +56,7 @@ def test_post_chat_invokes_central_llm_function(client: TestClient) -> None:
             "/chat",
             json={"msg": "user text", "session_id": "sid"},
         )
-    mock_llm.assert_awaited_once_with("user text")
+    mock_llm.assert_awaited_once_with("user text", "sid")
 
 
 def test_post_chat_missing_openai_key_503(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -121,56 +121,84 @@ def test_get_static_chat_js(client: TestClient) -> None:
 
 
 def test_post_ask_bot_urlencoded_ok(client: TestClient) -> None:
+    """VE-18: form-urlencoded msg + session_id → 200 JSON (Chatbot v4)."""
     with patch("main.invoke_chat_llm", new_callable=AsyncMock) as mock_llm:
         mock_llm.return_value = "form assistant reply"
         resp = client.post(
             "/ask_bot",
-            content=b"msg=hello&session_id=s1",
+            content=b"msg=test&session_id=s1",
             headers={"content-type": "application/x-www-form-urlencoded"},
         )
     assert resp.status_code == 200
+    assert "application/json" in resp.headers.get("content-type", "").lower()
     data = resp.json()
     assert data["msg"] == "form assistant reply"
     assert data["session_id"] == "s1"
     assert data["placeholder"] is False
     assert data["turn_count"] == 1
-    mock_llm.assert_awaited_once_with("hello")
+    mock_llm.assert_awaited_once_with("test", "s1")
 
 
-def test_post_ask_bot_missing_msg(client: TestClient) -> None:
-    resp = client.post(
-        "/ask_bot",
-        content=b"session_id=s1",
-        headers={"content-type": "application/x-www-form-urlencoded"},
-    )
-    assert resp.status_code == 422
+def test_post_ask_bot_missing_msg_uses_default_empty_stub(client: TestClient) -> None:
+    """VE-18: omitted msg defaults to ''; empty message → 200 stub, no LLM."""
+    with patch("main.invoke_chat_llm", new_callable=AsyncMock) as mock_llm:
+        resp = client.post(
+            "/ask_bot",
+            content=b"session_id=s1",
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["msg"] == "Please enter a message."
+    assert data["session_id"] == "s1"
+    assert data["placeholder"] is True
+    assert data["turn_count"] == 0
+    mock_llm.assert_not_called()
 
 
-def test_post_ask_bot_missing_session_id(client: TestClient) -> None:
-    resp = client.post(
-        "/ask_bot",
-        content=b"msg=hello",
-        headers={"content-type": "application/x-www-form-urlencoded"},
-    )
-    assert resp.status_code == 422
+def test_post_ask_bot_missing_session_id_defaults_to_default(client: TestClient) -> None:
+    """VE-18: omitted session_id defaults to 'default'."""
+    with patch("main.invoke_chat_llm", new_callable=AsyncMock) as mock_llm:
+        mock_llm.return_value = "ok"
+        resp = client.post(
+            "/ask_bot",
+            content=b"msg=hello",
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["session_id"] == "default"
+    assert data["msg"] == "ok"
+    mock_llm.assert_awaited_once_with("hello", "default")
 
 
-def test_post_ask_bot_whitespace_msg(client: TestClient) -> None:
-    resp = client.post(
-        "/ask_bot",
-        content=b"msg=+++&session_id=s1",
-        headers={"content-type": "application/x-www-form-urlencoded"},
-    )
-    assert resp.status_code == 422
+def test_post_ask_bot_whitespace_msg_is_empty_stub(client: TestClient) -> None:
+    """Whitespace-only msg → same as empty (no LLM)."""
+    with patch("main.invoke_chat_llm", new_callable=AsyncMock) as mock_llm:
+        resp = client.post(
+            "/ask_bot",
+            content=b"msg=+++&session_id=s1",
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
+    assert resp.status_code == 200
+    assert resp.json()["placeholder"] is True
+    mock_llm.assert_not_called()
 
 
-def test_post_ask_bot_empty_body(client: TestClient) -> None:
-    resp = client.post(
-        "/ask_bot",
-        content=b"",
-        headers={"content-type": "application/x-www-form-urlencoded"},
-    )
-    assert resp.status_code == 422
+def test_post_ask_bot_empty_body_openapi_defaults(client: TestClient) -> None:
+    """VE-18: empty body → msg='', session_id='default', 200 JSON stub."""
+    with patch("main.invoke_chat_llm", new_callable=AsyncMock) as mock_llm:
+        resp = client.post(
+            "/ask_bot",
+            content=b"",
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["session_id"] == "default"
+    assert data["msg"] == "Please enter a message."
+    assert data["placeholder"] is True
+    mock_llm.assert_not_called()
 
 
 def test_post_ask_bot_json_unsupported(client: TestClient) -> None:
@@ -192,12 +220,35 @@ def test_openapi_json_contains_paths(client: TestClient) -> None:
     assert "/ask_bot" in paths
     get_home = paths["/"].get("get", {})
     assert get_home.get("summary") == "Home"
+    assert get_home.get("operationId") == "home_get"
     get_health = paths["/health"].get("get", {})
     assert get_health.get("summary") == "Health"
     post_chat = paths["/chat"].get("post", {})
     assert post_chat.get("summary") == "Chat"
     post_ask = paths["/ask_bot"].get("post", {})
     assert post_ask.get("summary") == "Ask Bot"
+    assert post_ask.get("operationId") == "ask_bot_ask_bot_post"
+    rb = post_ask.get("requestBody", {})
+    content = rb.get("content", {})
+    assert "application/x-www-form-urlencoded" in content
+    form_schema = content["application/x-www-form-urlencoded"].get("schema", {})
+    props = form_schema.get("properties", {})
+    assert "msg" in props
+    assert "session_id" in props
+
+
+def test_stub_replies_do_not_contain_clinical_diagnosis_language(client: TestClient) -> None:
+    """VE-18 safety: empty-msg stub is non-clinical."""
+    with patch("main.invoke_chat_llm", new_callable=AsyncMock):
+        resp = client.post(
+            "/ask_bot",
+            content=b"",
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
+    text = resp.json()["msg"].lower()
+    assert "diagnos" not in text
+    assert "prescri" not in text
+    assert "mg/kg" not in text
 
 
 # ---------- VE-21: session memory tests ----------
@@ -310,12 +361,13 @@ def test_invalid_ask_bot_does_not_write_session_memory(client: TestClient) -> No
             ("assistant", "ok"),
         ]
 
-        bad422 = client.post(
+        empty_stub = client.post(
             "/ask_bot",
             content=b"",
             headers={"content-type": "application/x-www-form-urlencoded"},
         )
-        assert bad422.status_code == 422
+        assert empty_stub.status_code == 200
+        assert empty_stub.json()["placeholder"] is True
         assert len(session_messages_copy("s-ab")) == 2
 
 

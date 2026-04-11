@@ -1,4 +1,4 @@
-"""Clinic chatbot API: GET / (HTML demo), GET /health, POST /chat (JSON), POST /ask_bot."""
+"""Clinic chatbot API: Chatbot v4 (GET / HTML, POST /ask_bot form); plus /health and POST /chat."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from conversation_memory import record_exchange
+from conversation_memory import record_exchange, session_messages_copy
 from llm_service import (
     LlmConfigurationError,
     LlmUpstreamError,
@@ -24,8 +24,9 @@ app = FastAPI(
     title="Chatbot v4",
     version="0.1.0",
     description=(
-        "Clinic chatbot API: HTML demo on /, JSON POST /chat, "
-        "form POST /ask_bot (LangChain + OpenAI via llm_service), GET /health."
+        "Chatbot v4 OpenAPI: GET / (HTML), POST /ask_bot (application/x-www-form-urlencoded). "
+        "Extensions: GET /health, POST /chat (JSON), static /static. "
+        "LLM via llm_service where configured."
     ),
 )
 
@@ -95,6 +96,7 @@ class AskBotResponse(BaseModel):
 @app.get(
     "/",
     summary="Home",
+    operation_id="home_get",
     response_class=Response,
     responses={200: {"content": {"text/html": {}}}},
 )
@@ -157,26 +159,53 @@ def _parse_urlencoded_body(body_bytes: bytes) -> dict[str, str]:
     return flat
 
 
-def _validate_ask_bot_fields(msg: str | None, session_id: str | None) -> tuple[str, str]:
-    if msg is None or session_id is None:
-        raise HTTPException(
-            status_code=422,
-            detail="msg and session_id are required fields",
-        )
-    msg_clean = msg.strip()
-    session_clean = session_id.strip()
-    if not msg_clean or not session_clean:
-        raise HTTPException(
-            status_code=422,
-            detail="msg and session_id must be non-empty strings",
-        )
-    return msg_clean, session_clean
+def _resolve_ask_bot_form_fields(body_bytes: bytes) -> tuple[str, str]:
+    """Parse urlencoded body; apply Chatbot v4 defaults for missing keys.
+
+    OpenAPI defaults: ``msg`` → ``''``, ``session_id`` → ``'default'``.
+    Empty or whitespace-only ``session_id`` is normalized to ``'default'``.
+
+    :param body_bytes: Raw body; may be empty when all defaults apply.
+    :return: ``(msg, session_id)`` as stored in the form (msg not stripped).
+    """
+    if not body_bytes.strip():
+        return "", "default"
+    fields = _parse_urlencoded_body(body_bytes)
+    msg = fields.get("msg", "")
+    session_raw = fields.get("session_id", "default")
+    session_clean = session_raw.strip()
+    if not session_clean:
+        session_clean = "default"
+    return msg, session_clean
+
+
+_EMPTY_MSG_REPLY = "Please enter a message."
 
 
 @app.post(
     "/ask_bot",
     summary="Ask Bot",
+    operation_id="ask_bot_ask_bot_post",
     response_model=AskBotResponse,
+    openapi_extra={
+        "requestBody": {
+            "content": {
+                "application/x-www-form-urlencoded": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "msg": {"type": "string", "default": "", "title": "Msg"},
+                            "session_id": {
+                                "type": "string",
+                                "default": "default",
+                                "title": "Session Id",
+                            },
+                        },
+                    }
+                }
+            }
+        }
+    },
 )
 async def ask_bot(request: Request) -> AskBotResponse:
     content_type = (request.headers.get("content-type") or "").lower()
@@ -186,14 +215,17 @@ async def ask_bot(request: Request) -> AskBotResponse:
             detail="Content-Type must be application/x-www-form-urlencoded",
         )
     body_bytes = await request.body()
-    if not body_bytes.strip():
-        raise HTTPException(status_code=422, detail="Request body is empty")
-    fields = _parse_urlencoded_body(body_bytes)
-    msg, session_id = _validate_ask_bot_fields(
-        fields.get("msg"),
-        fields.get("session_id"),
-    )
-    return await _assistant_reply(msg, session_id)
+    msg, session_id = _resolve_ask_bot_form_fields(body_bytes)
+    msg_clean = msg.strip()
+    if not msg_clean:
+        turn_count = len(session_messages_copy(session_id)) // 2
+        return AskBotResponse(
+            msg=_EMPTY_MSG_REPLY,
+            session_id=session_id,
+            placeholder=True,
+            turn_count=turn_count,
+        )
+    return await _assistant_reply(msg_clean, session_id)
 
 
 if STATIC_DIR.is_dir():
