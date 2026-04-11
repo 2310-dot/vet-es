@@ -105,7 +105,7 @@ Roadmap de producto a alto nivel: **TBD** (p.ej. enlace a Confluence o épica cu
 | [docs/event-storming-workflow.md](docs/event-storming-workflow.md)           | Flujo de reserva y reglas de capacidad     |
 | [docs/pre-operative-considerations.md](docs/pre-operative-considerations.md) | Consideraciones preoperatorias (ES)        |
 | [docs/jira/](docs/jira/)                                                     | Exports de tickets enriquecidos (ejemplos) |
-| [.cursor/commands/implement.md](.cursor/commands/implement.md)               | Flujo ticket Jira → PR                     |
+| [.cursor/commands/implement.md](.cursor/commands/implement.md)               | Flujo ticket Jira → PR (tabla **BE / FE / PM** skills y subagentes, criterios de entrada/salida, checklist de PR) |
 | [.cursor/commands/enrich.md](.cursor/commands/enrich.md)                     | Flujo de enriquecimiento de tickets        |
 
 
@@ -174,7 +174,7 @@ Respuesta esperada (stub):
 
 ## Cursor workflows
 
-- **Implementar ticket Jira:** p. ej. *"Implement VE-12"* — lee el ticket, planifica según AC, desarrolla, mueve estados y abre PR. Detalle: [.cursor/commands/implement.md](.cursor/commands/implement.md).
+- **Implementar ticket Jira:** p. ej. *"Implement VE-12"* — lee el ticket, planifica según AC, desarrolla, mueve estados y abre PR. En **implement.md** tienes el mapa explícito **backend** (`.cursor/skills/langchain-vet-chatbots/`), **PM** (`.cursor/skills/product-manager-ticket-enrichment/` + comando **enrich**), y **frontend** (sin skill en repo aún; ver tabla). Incluye criterios de entrada/salida y checklist de PR/revisión. Detalle: [.cursor/commands/implement.md](.cursor/commands/implement.md).
 - **Enriquecer ticket:** *"Enrich VE-1"* o `/enrich` — refina criterios y alcance con el agente PM; publicar en Jira requiere tu aprobación. Detalle: [.cursor/commands/enrich.md](.cursor/commands/enrich.md).
 
 ## Despliegue

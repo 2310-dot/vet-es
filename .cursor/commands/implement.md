@@ -1,6 +1,55 @@
 # Implement workflow (Jira ticket → PR)
 
-Use this workflow when the user asks to **implement** a Jira ticket (e.g. "implement PROJ-123", "run implement for JIRA-456"). Execute phases in order. Use the **backend-langchain-vet** subagent for the development phase.
+Use this workflow when the user asks to **implement** a Jira ticket (e.g. "implement PROJ-123", "run implement for JIRA-456"). Execute phases in order. Use the **backend-langchain-vet** subagent for backend development in Phase 4 when the ticket changes application code (see **Skills, subagents, and related commands** below).
+
+---
+
+## Skills, subagents, and related commands (BE / FE / PM)
+
+Use this table so a new contributor knows **which skill to read** and **which Cursor subagent** (Task tool) fits each kind of work. Paths are relative to the repo root.
+
+| Area | Skill (follow during implementation) | Subagent (`Task`) | When to use |
+| ---- | ------------------------------------ | ----------------- | ----------- |
+| **PM / spec** | `.cursor/skills/product-manager-ticket-enrichment/SKILL.md` | **`product-manager`** | Vague tickets: run **[`enrich.md`](enrich.md)** first to harden AC, risks, and dependencies. Optional if the ticket is already dev-ready. |
+| **Backend** (Python, LangChain, FastAPI, clinic bot) | `.cursor/skills/langchain-vet-chatbots/SKILL.md` | **`backend-langchain-vet`** | **Phase 4** when changing backend code, prompts, tools, RAG, memory, or API behavior. |
+| **Frontend** (UI, channel client) | **None in-repo yet** — add `.cursor/skills/<frontend>/SKILL.md` when the channel is fixed; then reference it here. | **`generalPurpose`** (or a future FE subagent) | **Phase 4** for UI or client-only tickets until a frontend skill exists. |
+
+**Agent personas** (used with the subagents above): `.cursor/agents/backend-langchain-vet.md`, `.cursor/agents/product-manager.md`.
+
+**Docs-only tickets** (commands, README, pure documentation): the **parent agent** may implement without **`backend-langchain-vet`**; still use Phase 6 PR structure and run **tests** whenever code paths change.
+
+---
+
+## Entry criteria (start)
+
+- You have a **Jira key** or spec from which AC can be derived, or you will run **[`enrich.md`](enrich.md)** first.
+- **user-Atlassian** MCP is available if you will read or transition Jira issues from this workflow.
+
+## Exit criteria (“implemented”)
+
+The ticket is **implemented** for this workflow when:
+
+1. **Build:** Changes match the ticket AC (and tests pass where applicable).
+2. **PR:** A pull request is open to **`2310-dot/vet-es`** / **`main`** (never upstream `kuuli/enae-vet-es`).
+3. **Traceability:** PR body includes Jira link, summary, AC checklist, and testing notes (Phase 6).
+4. **Board:** Jira reflects active work (**In Progress**) and, after the PR exists, **In Review** or your team’s equivalent; if the board has no review column, use a PR comment plus **Done** after merge (see Phase 7).
+
+---
+
+## PR and review checklist (aligned with Phase 6)
+
+**Author**
+
+- [ ] PR targets **`2310-dot/vet-es`**, base **`main`**.
+- [ ] Branch name includes the ticket key when applicable.
+- [ ] Title and body reference Jira; body has an **AC checklist**.
+- [ ] **Testing** section documents commands run (e.g. `pytest`) or states **N/A** for docs-only.
+- [ ] No secrets committed; new env vars documented in **README** / `.env.example` if needed.
+
+**Reviewer**
+
+- [ ] AC satisfied or gaps explicitly called out.
+- [ ] Vet/clinic behavior matches `docs/` where relevant; no invented diagnoses or dosages.
 
 ---
 
@@ -39,13 +88,12 @@ Use this workflow when the user asks to **implement** a Jira ticket (e.g. "imple
 1. **Add a comment on the Jira ticket** so there is a reference when development started. Call **addCommentToJiraIssue** (user-Atlassian) with `cloudId`, `issueIdOrKey`, and a `commentBody` in markdown (use `contentFormat: "markdown"`). The comment should include:
    - A short line that implementation has started (e.g. "Implementation started via Cursor implement workflow.")
    - Optional: current date/time or a one-line summary of the plan (e.g. "Plan: [AC1], [AC2], …"). Keep it concise so the ticket has a clear "work started" reference.
-2. **Delegate development to the backend-langchain-vet subagent** (Task tool). Invoke it with a clear prompt that includes:
-   - The ticket key and title
-   - The AC items / todo list
-   - Relevant file paths or modules
-   - Any clarifications from Phase 3
-3. The subagent follows `.cursor/skills/langchain-vet-chatbots/SKILL.md` and project rules (e.g. TDD, Python, LangChain). Do not duplicate that guidance here.
-4. After the subagent completes: run tests, fix any failures, and ensure the implementation matches the AC. Update todos as steps are completed.
+2. **Delegate development** (Task tool) using the **Skills, subagents** table:
+   - **Backend / LangChain / API** work → **`backend-langchain-vet`** with `.cursor/skills/langchain-vet-chatbots/SKILL.md`.
+   - **Frontend-only** work (until a FE skill exists) → **`generalPurpose`** with ticket AC and repo conventions.
+   - **Docs-only** → parent agent may implement directly.
+   Pass: ticket key and title, AC / todos, file paths, Phase 3 clarifications.
+3. After delegation (or parent-agent work for docs-only): run tests when code changed, fix failures, and ensure the outcome matches the AC. Update todos as steps are completed.
 
 ---
 
@@ -81,6 +129,8 @@ Use this workflow when the user asks to **implement** a Jira ticket (e.g. "imple
 3. Call **transitionJiraIssue** with that transition `id`.
 4. Optionally add a short **comment** on the Jira issue (e.g. "PR opened: <link>") using **addCommentToJiraIssue** if the team expects it.
 
+If your board has **no In Review** status (only e.g. To Do / In Progress / Done), leave the issue **In Progress** until the PR is merged, add a PR link in a comment, then transition to **Done** per team practice.
+
 ---
 
 ## Checklist (agent self-verify)
@@ -89,7 +139,7 @@ Use this workflow when the user asks to **implement** a Jira ticket (e.g. "imple
 - [ ] Plan created and (if needed) confirmed with user.
 - [ ] Ambiguities clarified before coding.
 - [ ] Comment added on Jira ticket at start of development (reference for "work started").
-- [ ] Development done via **backend-langchain-vet** subagent; tests pass.
+- [ ] Development done via the right **subagent** (see Skills table) or parent agent for docs-only; tests pass when code changed.
 - [ ] Ticket moved To Do → In Progress.
 - [ ] PR created with ticket ref, summary, AC checklist, and testing notes.
 - [ ] Ticket moved In Progress → In Review; comment added if desired.
@@ -105,3 +155,10 @@ User says e.g.:
 - "Implement the ticket in this link: …"
 
 Then follow this document from Phase 1.
+
+---
+
+## Relation to **enrich**
+
+- **[`enrich.md`](enrich.md)** sharpens the **spec** (PM skill, phased refinement).
+- **This document** ships **code** and a **PR** from dev-ready AC.
