@@ -101,6 +101,23 @@ Validation failures (`422` / `415` on `/chat` or `/ask_bot`) do **not** append t
 
 Otras variables (CORS, puerto, RAG, etc.) siguen en `.env.example`.
 
+### Google Calendar tool (VE-24)
+
+The chat model can call **`list_google_calendar_events`** (read-only) against **Google Calendar API** when credentials are set. This is **staff-side** infrastructure: it does not replace Tetris / capacity rules in `docs/` and must not be used to expose **internal surgical times** to clients (see `docs/event-storming-workflow.md` and `docs/reglas-de-negocio-logica-de-agenda.md`).
+
+| Variable | Meaning |
+| -------- | ------- |
+| `GOOGLE_CALENDAR_ID` | Calendar to query (e.g. `primary` or a calendar ID). |
+| `GOOGLE_CALENDAR_CLIENT_ID` | OAuth client ID (Desktop app in Google Cloud Console). |
+| `GOOGLE_CALENDAR_CLIENT_SECRET` | OAuth client secret. |
+| `GOOGLE_CALENDAR_REFRESH_TOKEN` | OAuth refresh token (from a one-time local OAuth flow). |
+| `GOOGLE_CALENDAR_HTTP_TIMEOUT_SECONDS` | Optional timeout for API HTTP calls (default `30`). |
+| `GOOGLE_CALENDAR_USE_STUB` | If `1` / `true`, the tool skips Google and returns an empty success payload (for CI / local without creds). **Default:** live API when unset and env is complete. |
+
+**OAuth scope (minimal):** `https://www.googleapis.com/auth/calendar.readonly` — listed here and in code so reviewers can confirm least privilege.
+
+**Manual check (AC7):** Configure env (no secrets in git), run the API, send a chat message that should trigger a calendar lookup (e.g. ask what is on the calendar in a window you seeded in the test calendar), or call the tool from a short Python snippet using the same `list_google_calendar_events_impl` as production.
+
 ---
 
 ## Despliegue

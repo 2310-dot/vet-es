@@ -1,10 +1,10 @@
-"""Unit tests for llm_service (VE-20)."""
+"""Unit tests for llm_service (VE-20, VE-24)."""
 
 from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -25,13 +25,14 @@ def test_load_system_prompt_rejects_empty_file(tmp_path: Path) -> None:
 
 
 def test_invoke_chat_llm_maps_provider_exception() -> None:
-    async def boom(*_a, **_kw):
-        raise RuntimeError("simulated network failure")
-
     with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
         with patch("llm_service.ChatOpenAI") as mock_cls:
             instance = mock_cls.return_value
-            instance.ainvoke = boom
+            bound = MagicMock()
+            bound.ainvoke = AsyncMock(
+                side_effect=RuntimeError("simulated network failure")
+            )
+            instance.bind_tools.return_value = bound
 
             with pytest.raises(LlmUpstreamError, match="temporarily unavailable"):
                 asyncio.run(invoke_chat_llm("hi"))
@@ -42,13 +43,12 @@ def test_invoke_chat_llm_maps_provider_exception() -> None:
 def test_invoke_chat_llm_rejects_empty_model_content() -> None:
     from langchain_core.messages import AIMessage
 
-    async def empty_reply(*_a, **_kw):
-        return AIMessage(content="")
-
     with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
         with patch("llm_service.ChatOpenAI") as mock_cls:
             instance = mock_cls.return_value
-            instance.ainvoke = empty_reply
+            bound = MagicMock()
+            bound.ainvoke = AsyncMock(return_value=AIMessage(content=""))
+            instance.bind_tools.return_value = bound
 
             with pytest.raises(LlmUpstreamError, match="empty response"):
                 asyncio.run(invoke_chat_llm("hi"))
