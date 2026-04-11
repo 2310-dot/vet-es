@@ -124,7 +124,7 @@ async def health() -> HealthResponse:
 async def _assistant_reply(user_text: str, session_id: str) -> AskBotResponse:
     """Call the central LLM entrypoint, record the exchange in memory, and map errors to HTTP responses."""
     try:
-        reply = await invoke_chat_llm(user_text)
+        reply = await invoke_chat_llm(user_text, session_id)
     except LlmConfigurationError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except LlmUpstreamError as exc:

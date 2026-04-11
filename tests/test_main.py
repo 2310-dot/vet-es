@@ -339,8 +339,12 @@ def test_invoke_chat_llm_uses_system_prompt_from_file() -> None:
 
     with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test-key"}):
         with patch("llm_service.ChatOpenAI") as mock_cls:
+            from unittest.mock import MagicMock
+
             instance = mock_cls.return_value
-            instance.ainvoke = fake_ainvoke
+            bound = MagicMock()
+            bound.ainvoke = fake_ainvoke
+            instance.bind_tools.return_value = bound
             result = asyncio.run(invoke_chat_llm("user question"))
 
     assert result == "stub"
