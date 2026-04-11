@@ -95,7 +95,7 @@ Roadmap de producto a alto nivel: **TBD** (p.ej. enlace a Confluence o épica cu
 
 ---
 
-## Enlaces relevantes
+## Enlaces relevantes.
 
 
 | Recurso                                                                      | Descripción                                |
