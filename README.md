@@ -177,3 +177,26 @@ Respuesta esperada (stub):
 - **Implementar ticket Jira:** p. ej. *"Implement VE-12"* — lee el ticket, planifica según AC, desarrolla, mueve estados y abre PR. Detalle: [.cursor/commands/implement.md](.cursor/commands/implement.md).
 - **Enriquecer ticket:** *"Enrich VE-1"* o `/enrich` — refina criterios y alcance con el agente PM; publicar en Jira requiere tu aprobación. Detalle: [.cursor/commands/enrich.md](.cursor/commands/enrich.md).
 
+## Despliegue
+
+**URL de producción:** `https://vercel.com/2310-dots-projects/vet-es`
+
+### Procedimiento
+
+El proyecto se despliega automáticamente en Vercel al hacer push o merge
+sobre la rama `main`.
+
+- **Plataforma:** Vercel
+- **Rama de producción:** `main`
+- **Builds de preview:** generados automáticamente para cada Pull Request
+
+### Variables de entorno
+
+Las variables de entorno se gestionan **únicamente en el panel de Vercel**
+(`Settings → Environment Variables`). No existe ningún `.env` commiteado.
+
+Para desarrollo local, copiar `.env.example` y rellenar los valores:
+
+```bash
+cp .env.example .env.local
+```
