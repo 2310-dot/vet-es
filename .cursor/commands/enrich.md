@@ -6,8 +6,8 @@ Use this workflow when the user asks to **enrich**, **groom**, or **refine** a J
 
 ## Prerequisites
 
-- **Jira ticket key** or URL: User provides it (e.g. `VE-16`, `VETES-1`). If missing, ask.
-- **Jira MCP**: Use the **user-Atlassian** MCP server. For any Jira call you need `cloudId` and `issueIdOrKey`. Get `cloudId` first via **getAccessibleAtlassianResources** (no args); then use it with **getJiraIssue**, **getTransitionsForJiraIssue**, **transitionJiraIssue**, **addCommentToJiraIssue**, or **editJiraIssue** as needed. Prefer `responseContentFormat: "markdown"` on **getJiraIssue** when supported.
+- **Jira ticket key** or URL: User provides it (e.g. `VETES-1`). If missing, ask.
+- **Atlassian MCP**: Same as the implement workflow. Obtain `cloudId` via **getAccessibleAtlassianResources**; use **getJiraIssue** with `cloudId`, `issueIdOrKey`, and `responseContentFormat: "markdown"` when supported.
 - **Skill**: `.cursor/skills/product-manager-ticket-enrichment/SKILL.md` (and `reference.md` in that folder for the output template).
 - **Product manager persona**: `.cursor/agents/product-manager.md`.
 
@@ -17,7 +17,7 @@ Use this workflow when the user asks to **enrich**, **groom**, or **refine** a J
 
 Phases **2–5** require deep product thinking. **Delegate** that work so the PM methodology stays consistent:
 
-1. Use the **Task** tool with **`subagent_type`: `product-manager`** when that subagent is available; otherwise use **`generalPurpose`** with the same instructions below.
+1. Use the **Task** tool with **`subagent_type`: `generalPurpose`** (unless a dedicated `product-manager` subagent is available in your environment).
 2. In the task prompt, instruct the subagent to:
    - Read **`.cursor/agents/product-manager.md`** and follow it as its role definition.
    - Apply **`.cursor/skills/product-manager-ticket-enrichment/SKILL.md`** phases **A–E** (Diagnose → Structure → AC hardening → Delivery readiness → Quality gate).
@@ -30,8 +30,8 @@ The **parent agent** keeps responsibility for Jira API calls, user approval, and
 
 ## Phase 1: Ingest the ticket
 
-1. Call **getAccessibleAtlassianResources** (user-Atlassian) to obtain `cloudId`.
-2. Call **getJiraIssue** (user-Atlassian) with `cloudId`, `issueIdOrKey`, and readable description format (`responseContentFormat: "markdown"` when available).
+1. Call **getAccessibleAtlassianResources** to obtain `cloudId`.
+2. Call **getJiraIssue** with `cloudId`, `issueIdOrKey`, and readable description format (`responseContentFormat: "markdown"` when available).
 3. Capture: **summary**, **description**, **acceptance criteria** (if embedded), **issue type**, **status**, **labels**, **parent/epic** if visible, and **issue links** if relevant.
 4. Give the user a **one-paragraph** restatement of what the ticket is trying to achieve (no solutions yet).
 
@@ -39,7 +39,7 @@ The **parent agent** keeps responsibility for Jira API calls, user approval, and
 
 ## Phase 2: Diagnose (delegated)
 
-Run the **Task** PM delegation described above (`product-manager` or `generalPurpose`). Request **Phase A output only**:
+Run the **Task** (`generalPurpose`) PM delegation described above. Request **Phase A output only**:
 
 - Maturity classification.
 - Gap list and contradictions.
@@ -135,11 +135,3 @@ Then follow this document from Phase 1.
 ## Relation to **implement**
 
 - **enrich** improves the **spec**; **implement** builds from it. After enrich, suggest running **implement** only when AC are stable and open questions are resolved or explicitly deferred.
-
----
-
-## Before/after example (reference)
-
-For a concrete **vague ticket → enriched spec** illustration (testable AC, scope, DoD), see:
-
-- [`docs/jira/VETES-14-before-after-example.md`](../../docs/jira/VETES-14-before-after-example.md)
