@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
+from conversation_memory import record_exchange
 from llm_service import (
     LlmConfigurationError,
     LlmUpstreamError,
@@ -83,6 +84,12 @@ class AskBotResponse(BaseModel):
         default=False,
         description="Reserved for stub responses; false when the LLM produced msg.",
     )
+    turn_count: int = Field(
+        default=0,
+        ge=0,
+        description="Completed user→assistant pairs stored for this session after this request.",
+        examples=[1],
+    )
 
 
 @app.get(
@@ -115,14 +122,20 @@ async def health() -> HealthResponse:
 
 
 async def _assistant_reply(user_text: str, session_id: str) -> AskBotResponse:
-    """Call the central LLM entrypoint and map errors to HTTP responses."""
+    """Call the central LLM entrypoint, record the exchange in memory, and map errors to HTTP responses."""
     try:
         reply = await invoke_chat_llm(user_text)
     except LlmConfigurationError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except LlmUpstreamError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return AskBotResponse(msg=reply, session_id=session_id, placeholder=False)
+    turn_count = record_exchange(session_id, user_text, reply)
+    return AskBotResponse(
+        msg=reply,
+        session_id=session_id,
+        placeholder=False,
+        turn_count=turn_count,
+    )
 
 
 @app.post(
@@ -131,7 +144,7 @@ async def _assistant_reply(user_text: str, session_id: str) -> AskBotResponse:
     response_model=AskBotResponse,
 )
 async def chat(body: ChatRequest) -> AskBotResponse:
-    """JSON chat: delegates to :func:`llm_service.invoke_chat_llm`."""
+    """JSON chat: delegates to :func:`llm_service.invoke_chat_llm` and records memory."""
     return await _assistant_reply(body.msg, body.session_id)
 
 
