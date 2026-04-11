@@ -63,6 +63,8 @@ Use this workflow when the user asks to **implement** a Jira ticket (e.g. "imple
 1. Create a branch from the default branch (e.g. `main`/`master`), name it by ticket and short slug (e.g. `PROJ-123-add-patient-lookup-tool`).
 2. Commit changes with a message that references the ticket (e.g. `PROJ-123: Add patient lookup tool and tests`).
 3. Push the branch and open a **Pull Request** (via Git + GitHub MCP or `gh` CLI if available).
+   IMPORTANT: This repo is a fork. PRs MUST target `2310-dot/vet-es`, never upstream `kuuli/enae-vet-es`. Always pass `--repo 2310-dot/vet-es` (or use the GitHub MCP with owner=`2310-dot`, repo=`vet-es`).
+   `gh pr create --repo 2310-dot/vet-es --base main --head <branch> --title "<title>" --body "<body>"`
 4. **PR description** must include:
    - **Jira ticket**: link or key (e.g. `[PROJ-123](url)`).
    - **Summary**: 1–2 sentences on what this change does.
