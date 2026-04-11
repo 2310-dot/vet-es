@@ -71,6 +71,12 @@ python -m uvicorn main:app --reload
 
 **Tests (opcional):** con el venv activo, `python -m pip install -r requirements-dev.txt` si aplica, luego `pytest`.
 
+### Pre-op RAG (VE-22)
+
+- **Config** (chunk size, overlap, embedding model, source URL, `PREOP_RAG_CONFIG_VERSION`): `preop_rag/config.py`.
+- **Demo local:** `python -m preop_rag.demo` (requiere `OPENAI_API_KEY`; usa `python -m preop_rag.demo --fake-embeddings` solo para comprobar el cableado sin API).
+- **Tests:** `pytest` (e2e con HTML de fixture y vector store en memoria). Prueba opcional con red y OpenAI: `RUN_PREOP_RAG_LIVE=1 pytest -m preop_live`.
+
 ---
 
 ## Variables de entorno
