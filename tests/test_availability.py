@@ -1,8 +1,9 @@
-"""Tests for mock surgical availability tool (VE-29)."""
+"""Tests for surgical availability tool (VE-29 mock, VE-30 Google Calendar)."""
 
 from __future__ import annotations
 
 import copy
+from unittest.mock import patch
 
 import pytest
 
@@ -72,3 +73,91 @@ def test_friday_one_eighty() -> None:
 def test_surgical_availability_tools_list() -> None:
     tools = surgical_availability_tools()
     assert any(t.name == "check_surgical_availability" for t in tools)
+
+
+def test_google_path_uses_events_for_minutes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Live Calendar path sums timed events into quota (VE-30)."""
+    monkeypatch.delenv("GOOGLE_CALENDAR_USE_STUB", raising=False)
+    monkeypatch.setenv("GOOGLE_CALENDAR_ID", "primary")
+    monkeypatch.setenv("GOOGLE_CALENDAR_CLIENT_ID", "cid")
+    monkeypatch.setenv("GOOGLE_CALENDAR_CLIENT_SECRET", "sec")
+    monkeypatch.setenv("GOOGLE_CALENDAR_REFRESH_TOKEN", "ref")
+
+    fake_payload = {
+        "ok": True,
+        "events": [
+            {
+                "id": "e1",
+                "summary": "Block",
+                "start": "2026-04-14T09:00:00+02:00",
+                "end": "2026-04-14T10:30:00+02:00",
+                "status": "confirmed",
+            }
+        ],
+        "truncated": False,
+    }
+
+    with patch(
+        "tools.availability.list_google_calendar_events_impl",
+        return_value=fake_payload,
+    ):
+        out = check_availability("2026-04-14")
+
+    assert out["source"] == "google_calendar"
+    assert out["slots_remaining_minutes"] == 240 - 90
+    assert out["dogs_remaining"] is None
+    assert out["cats_remaining"] is None
+    assert out["available"] is True
+
+
+def test_google_path_all_day_blocks_day(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("GOOGLE_CALENDAR_USE_STUB", raising=False)
+    monkeypatch.setenv("GOOGLE_CALENDAR_ID", "primary")
+    monkeypatch.setenv("GOOGLE_CALENDAR_CLIENT_ID", "cid")
+    monkeypatch.setenv("GOOGLE_CALENDAR_CLIENT_SECRET", "sec")
+    monkeypatch.setenv("GOOGLE_CALENDAR_REFRESH_TOKEN", "ref")
+
+    fake_payload = {
+        "ok": True,
+        "events": [
+            {
+                "id": "holiday",
+                "summary": "Closed",
+                "start": "2026-04-14",
+                "end": "2026-04-15",
+                "status": "confirmed",
+            }
+        ],
+        "truncated": False,
+    }
+    with patch(
+        "tools.availability.list_google_calendar_events_impl",
+        return_value=fake_payload,
+    ):
+        out = check_availability("2026-04-14")
+    assert out["source"] == "google_calendar"
+    assert out["slots_remaining_minutes"] == 0
+    assert out["available"] is False
+    assert "reason" in out
+
+
+def test_stub_forces_mock_even_with_oauth_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GOOGLE_CALENDAR_USE_STUB", "1")
+    monkeypatch.setenv("GOOGLE_CALENDAR_ID", "primary")
+    monkeypatch.setenv("GOOGLE_CALENDAR_CLIENT_ID", "cid")
+    monkeypatch.setenv("GOOGLE_CALENDAR_CLIENT_SECRET", "sec")
+    monkeypatch.setenv("GOOGLE_CALENDAR_REFRESH_TOKEN", "ref")
+
+    def boom(*_a: object, **_k: object) -> dict:
+        raise AssertionError("Google should not be called when stub=1")
+
+    with patch("tools.availability.list_google_calendar_events_impl", boom):
+        out = check_availability("2026-04-14")
+    assert out["source"] == "mock"
+    assert out["slots_remaining_minutes"] == 120

@@ -160,11 +160,22 @@ Validation failures (`422` / `415` on `/chat`, `/ask_bot`, or `/askbot`) do **no
 
 Otras variables (CORS, puerto, RAG, etc.) siguen en `.env.example`.
 
-### Orientative surgical availability (`check_surgical_availability`, VE-29)
+### Orientative surgical availability (`check_surgical_availability`, VE-29 + VE-30)
 
-The chat model binds **`check_surgical_availability`**: a **mock** read-model for theatre capacity by date (`YYYY-MM-DD`). It is **not** a real calendar; responses always include `"source": "mock"`. The agent must treat results as **orientative** only (see `prompt.md`).
+The chat model binds **`check_surgical_availability`**: orientative theatre capacity for a calendar day (`YYYY-MM-DD`). The agent must treat results as **orientative** only and **must not** confirm a booking or claim a “real” client calendar (see `prompt.md`).
 
-**Python module:** [tools/availability.py](tools/availability.py) — pure function `check_availability(date: str) -> dict` plus the LangChain `StructuredTool`.
+**Python module:** [tools/availability.py](tools/availability.py) — `check_availability(date: str) -> dict` plus the LangChain `StructuredTool`.
+
+**Data sources:**
+
+| Mode | When | `source` field |
+| --- | --- | --- |
+| **Google Calendar** (VE-30) | `GOOGLE_CALENDAR_USE_STUB` is not set to a truthy value **and** `GOOGLE_CALENDAR_ID` plus OAuth env vars are complete | `"google_calendar"` |
+| **Mock** (VE-29) | `GOOGLE_CALENDAR_USE_STUB=1` (CI / no creds), incomplete Google env, or weekend rule below | `"mock"` |
+
+**Google path (VE-30):** For each **weekday** (Europe/Madrid calendar day), the tool calls [google_calendar_tool.py](google_calendar_tool.py) → **Google Calendar API** (`calendar.googleapis.com`, `events.list`). Timed events contribute their duration (clipped to that day) to consumed minutes; **all-day** events block the full **240** minutes. Remaining minutes = `240 − consumed` (floored at 0). `dogs_remaining` / `cats_remaining` are **`null`** in this mode (not inferred from Calendar).
+
+**Weekends:** No surgical activity is returned (`available: false`, `source: "mock"`) without calling Google.
 
 **What the mock simulates (fixed fiction, VE-29):**
 
@@ -180,8 +191,8 @@ The chat model binds **`check_surgical_availability`**: a **mock** read-model fo
 
 **JSON schema (documented for tooling and logs):**
 
-- **Weekday with capacity** (`available: true`): `date`, `weekday` (English), `available`, `slots_remaining_minutes`, `dogs_remaining`, `cats_remaining`, `intake_windows` (`cats`, `dogs`, Unicode en-dash as in the ticket), `source`, `note`.
-- **Weekend or invalid date** (`available: false`): `date`, `weekday` when the date parses, `available`, `reason`, `source`. Invalid ISO dates omit `weekday` and use a clear `reason` (no Python exception from the tool).
+- **Weekday with capacity** (`available: true`): `date`, `weekday` (English), `available`, `slots_remaining_minutes`, `dogs_remaining`, `cats_remaining` (integers in mock; `null` in Google mode), `intake_windows` (`cats`, `dogs`, Unicode en-dash as in the ticket), `source`, `note`.
+- **Weekend, invalid date, or Google error** (`available: false`): `date`, `weekday` when the date parses, `available`, `reason`, `source`. Invalid ISO dates omit `weekday` and use a clear `reason` (no Python exception from the tool).
 
 **Example `curl` (agent may call the tool when answering):**
 
@@ -191,26 +202,55 @@ curl -X POST http://127.0.0.1:8000/chat \
   -d "{\"msg\": \"¿Hay disponibilidad para operar a mi gato el próximo martes?\", \"session_id\": \"test-tool-1\"}"
 ```
 
-**Expected server log (operator):** lines like `[tool] check_surgical_availability called with date="..."` and a compact `[tool] Response: {...}` from [tools/availability.py](tools/availability.py).
+**Expected server log (operator):** lines like `[tool] check_surgical_availability called with date="..."` and `[tool] Response: {...}` from [tools/availability.py](tools/availability.py). With a live Google configuration you should also see a line containing **`calendar.googleapis.com`** from [google_calendar_tool.py](google_calendar_tool.py) before the API response.
 
 **Unit tests (no server):** `pytest tests/test_availability.py -v`
 
+#### Google OAuth setup (reproducible, no secrets in git)
+
+1. In [Google Cloud Console](https://console.cloud.google.com), create a project (e.g. `vet-es-chatbot`), enable **Google Calendar API**, and create an OAuth client of type **Desktop app**.
+2. Download the client JSON (do **not** commit it; keep it outside the repo or add a local ignore pattern).
+3. Run the one-time token helper (install deps from `requirements.txt` first):
+
+```bash
+python scripts/get_google_token.py path/to/client_secret.apps.googleusercontent.com.json
+```
+
+4. Copy the printed `GOOGLE_CALENDAR_REFRESH_TOKEN=...` into your local `.env` together with `GOOGLE_CALENDAR_CLIENT_ID`, `GOOGLE_CALENDAR_CLIENT_SECRET`, and `GOOGLE_CALENDAR_ID` (e.g. `primary`). See [.env.example](.env.example) for placeholders **without real values**.
+
+**Coursework evidence:** after a successful live call, save a log snippet or screenshot under [docs/evidence/](docs/evidence/) or attach it to the PR (see [docs/evidence/README.md](docs/evidence/README.md)).
+
 ### Google Calendar tool (VE-24)
 
-The chat model can call **`list_google_calendar_events`** (read-only) against **Google Calendar API** when credentials are set. This is **staff-side** infrastructure: it does not replace Tetris / capacity rules in `docs/` and must not be used to expose **internal surgical times** to clients (see `docs/event-storming-workflow.md` and `docs/reglas-de-negocio-logica-de-agenda.md`).
+The codebase also exposes **`list_google_calendar_events`** (read-only) in [google_calendar_tool.py](google_calendar_tool.py) for RFC 3339 time windows. It uses the **same** environment variables as the table below. This is **staff-side** infrastructure: it does not replace Tetris / capacity rules in `docs/` and must not be used to expose **internal surgical times** to clients (see `docs/event-storming-workflow.md` and `docs/reglas-de-negocio-logica-de-agenda.md`).
 
 | Variable | Meaning |
 | -------- | ------- |
 | `GOOGLE_CALENDAR_ID` | Calendar to query (e.g. `primary` or a calendar ID). |
 | `GOOGLE_CALENDAR_CLIENT_ID` | OAuth client ID (Desktop app in Google Cloud Console). |
 | `GOOGLE_CALENDAR_CLIENT_SECRET` | OAuth client secret. |
-| `GOOGLE_CALENDAR_REFRESH_TOKEN` | OAuth refresh token (from a one-time local OAuth flow). |
+| `GOOGLE_CALENDAR_REFRESH_TOKEN` | OAuth refresh token (from `scripts/get_google_token.py`). |
 | `GOOGLE_CALENDAR_HTTP_TIMEOUT_SECONDS` | Optional timeout for API HTTP calls (default `30`). |
-| `GOOGLE_CALENDAR_USE_STUB` | If `1` / `true`, the tool skips Google and returns an empty success payload (for CI / local without creds). **Default:** live API when unset and env is complete. |
+| `GOOGLE_CALENDAR_USE_STUB` | If `1` / `true`, skips live Google (stub empty list for `list_google_calendar_events`; **mock** table for `check_surgical_availability`). **Default:** live API when unset and env is complete. |
 
 **OAuth scope (minimal):** `https://www.googleapis.com/auth/calendar.readonly` — listed here and in code so reviewers can confirm least privilege.
 
-**Manual check (AC7):** Configure env (no secrets in git), run the API, send a chat message that should trigger a calendar lookup (e.g. ask what is on the calendar in a window you seeded in the test calendar), or call the tool from a short Python snippet using the same `list_google_calendar_events_impl` as production.
+**Manual check:** Configure env (no secrets in git), run the API, send a chat message that should trigger availability for a weekday, or call `list_google_calendar_events_impl` / `check_availability` from a short Python snippet.
+
+### Limitaciones (Google Calendar vs reglas de negocio del caso)
+
+Google Calendar is a **generic** calendar. It is **not** the full ENAE “Tetris” scheduler:
+
+| Regla de negocio | ¿Cubierta por Google Calendar? | Cómo se gestiona aquí |
+| --- | --- | --- |
+| Cuota 240 min / día | No nativa | Se **aproxima** sumando duraciones de eventos del día (herramienta de disponibilidad). |
+| Límite de perros por día | No | No implementado en la integración actual; el modo Google devuelve `dogs_remaining: null`. |
+| Ventanas de ingreso (gatos / perros) | No | Solo se devuelven como texto fijo en `intake_windows`; no se validan contra eventos. |
+| Horarios quirúrgicos internos | No expuestos | La herramienta es orientativa para el agente; no sustituye confirmación humana. |
+| Otras reglas (celo, etc.) | No | Fuera del alcance de esta integración. |
+
+**Conclusión:** use Calendar as a **signal** for same-day occupancy, not as the sole source of truth for clinic booking rules.
+
 
 ---
 

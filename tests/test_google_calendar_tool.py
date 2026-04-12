@@ -8,10 +8,33 @@ import pytest
 
 from google_calendar_tool import (
     OAUTH_SCOPE,
+    is_google_calendar_live_enabled,
     list_google_calendar_events,
     list_google_calendar_events_impl,
     parse_rfc3339_datetime,
 )
+
+
+def test_is_google_calendar_live_enabled_respects_stub(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GOOGLE_CALENDAR_USE_STUB", "1")
+    monkeypatch.setenv("GOOGLE_CALENDAR_ID", "primary")
+    monkeypatch.setenv("GOOGLE_CALENDAR_CLIENT_ID", "cid")
+    monkeypatch.setenv("GOOGLE_CALENDAR_CLIENT_SECRET", "sec")
+    monkeypatch.setenv("GOOGLE_CALENDAR_REFRESH_TOKEN", "ref")
+    assert is_google_calendar_live_enabled() is False
+
+
+def test_is_google_calendar_live_enabled_true_when_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("GOOGLE_CALENDAR_USE_STUB", raising=False)
+    monkeypatch.setenv("GOOGLE_CALENDAR_ID", "primary")
+    monkeypatch.setenv("GOOGLE_CALENDAR_CLIENT_ID", "cid")
+    monkeypatch.setenv("GOOGLE_CALENDAR_CLIENT_SECRET", "sec")
+    monkeypatch.setenv("GOOGLE_CALENDAR_REFRESH_TOKEN", "ref")
+    assert is_google_calendar_live_enabled() is True
 
 
 def test_parse_rfc3339_accepts_z_suffix() -> None:

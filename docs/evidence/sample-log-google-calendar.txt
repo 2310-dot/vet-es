@@ -1,0 +1,5 @@
+# Illustrative log fragment (redacted). Real runs will show your calendar id and timestamps.
+
+INFO google_calendar_tool Google Calendar API HTTP request to calendar.googleapis.com (calendar v3 events.list, calendarId=primary)
+INFO tools.availability [tool] check_surgical_availability called with date="2026-04-14"
+INFO tools.availability [tool] Response: {"date": "2026-04-14", "available": true, "slots_remaining_minutes": 150, "source": "google_calendar"}
