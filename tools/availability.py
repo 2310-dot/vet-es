@@ -33,7 +33,7 @@ from google_calendar_tool import (
 logger = logging.getLogger(__name__)
 
 DAILY_QUOTA_MINUTES: Final[int] = 240
-MAX_DOGS_PER_DAY: Final[int] = 3
+MAX_DOGS_PER_DAY: Final[int] = 2
 MAX_CATS_PER_DAY: Final[int] = 4
 
 CLINIC_TZ: Final[datetime.tzinfo] = ZoneInfo("Europe/Madrid")
@@ -57,18 +57,21 @@ _WEEKDAY_EN: Final[tuple[str, ...]] = (
     "Sunday",
 )
 
-# Mock occupancy pattern (VE-29): Mon/Wed tight, Tue/Thu medium, Fri light.
+# Mock occupancy (VE-29): Mon–Thu only per clinic rules; max 2 dogs/day enforced
+# in MAX_DOGS_PER_DAY. Thursday simulates two dogs already booked (0 dog slots
+# left) while some minute budget remains (Tetris / conv. 9). Tuesday stays open
+# for dog slots so a later “try Tuesday” turn can succeed in the mock.
 _MOCK_BY_WEEKDAY: Final[dict[int, tuple[int, int, int]]] = {
     0: (60, 1, 2),  # Monday
-    1: (120, 2, 3),  # Tuesday
+    1: (120, 2, 2),  # Tuesday
     2: (60, 1, 1),  # Wednesday
-    3: (120, 2, 2),  # Thursday
-    4: (180, 3, 3),  # Friday
+    3: (120, 0, 3),  # Thursday — no dog slots left; minutes may still remain
 }
 
 _TOOL_DESCRIPTION: Final[str] = (
     "Consulta la disponibilidad orientativa de quirófano para una fecha dada "
-    "(YYYY-MM-DD). Devuelve minutos disponibles y ventanas de ingreso. "
+    "(YYYY-MM-DD). Cirugía rutinaria: solo lunes a jueves. Devuelve minutos "
+    "disponibles, cupo de perros restante (máx. 2/día) y ventanas de ingreso. "
     "Datos orientativos, no confirma reserva."
 )
 
@@ -124,17 +127,18 @@ def _consumed_minutes_from_google_events(
 
 
 def _check_availability_mock(d: datetime.date) -> dict[str, Any]:
-    """VE-29 deterministic mock for a valid weekday *d* (not weekend)."""
+    """VE-29 deterministic mock for an operating day *d* (Monday–Thursday)."""
     iso = d.isoformat()
     weekday_name = _WEEKDAY_EN[d.weekday()]
     slots_left, dogs_left, cats_left = _MOCK_BY_WEEKDAY[d.weekday()]
     assert 0 <= slots_left <= DAILY_QUOTA_MINUTES
     assert 0 <= dogs_left <= MAX_DOGS_PER_DAY
     assert 0 <= cats_left <= MAX_CATS_PER_DAY
-    return {
+    available = slots_left > 0
+    out: dict[str, Any] = {
         "date": iso,
         "weekday": weekday_name,
-        "available": True,
+        "available": available,
         "slots_remaining_minutes": slots_left,
         "dogs_remaining": dogs_left,
         "cats_remaining": cats_left,
@@ -142,6 +146,11 @@ def _check_availability_mock(d: datetime.date) -> dict[str, Any]:
         "source": "mock",
         "note": ORIENTATIVE_NOTE,
     }
+    if not available:
+        out["reason"] = (
+            "Cuota diaria orientativa de quirófano completa para esta fecha (mock)."
+        )
+    return out
 
 
 def _check_availability_google(d: datetime.date) -> dict[str, Any]:
@@ -203,7 +212,8 @@ def check_availability(date: str) -> dict[str, Any]:
 
     Uses Google Calendar when :func:`is_google_calendar_live_enabled` is true;
     otherwise the VE-29 mock table. Invalid ISO dates return a structured
-    payload (no Python exception). Weekends return ``available: false``.
+    payload (no Python exception). Friday and weekends return
+    ``available: false`` (surgery Mon–Thu only).
 
     :param date: Calendar day in ``YYYY-MM-DD`` (leading/trailing spaces stripped).
     :return: JSON-serializable dict with ``source`` ``mock`` or ``google_calendar``.
@@ -228,6 +238,17 @@ def check_availability(date: str) -> dict[str, Any]:
             "weekday": weekday_name,
             "available": False,
             "reason": "No hay actividad quirúrgica en fin de semana.",
+            "source": "mock",
+        }
+
+    if d.weekday() == 4:
+        return {
+            "date": iso,
+            "weekday": weekday_name,
+            "available": False,
+            "reason": (
+                "No hay cirugía programada los viernes; días quirúrgicos: lunes a jueves."
+            ),
             "source": "mock",
         }
 
