@@ -10,6 +10,7 @@ from __future__ import annotations
 PREOP_RAG_CONFIG_VERSION = "preop-rag-ve28-2026-04-12"
 
 # Official pre-operative instructions page (English) used as RAG source.
+# VET-11 evidence: README § Pre-op RAG (URL + tests + runtime log).
 OFFICIAL_PREOP_DOC_URL = (
     "https://veterinary-clinic-teal.vercel.app/en/docs/instructions-before-operation"
 )

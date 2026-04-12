@@ -86,9 +86,16 @@ python -m uvicorn main:app --reload
 
 **Tests (opcional):** con el venv activo, `python -m pip install -r requirements-dev.txt` si aplica, luego `pytest`.
 
-### Pre-op RAG (VE-22, integración VE-28)
+### Pre-op RAG (VE-22, integración VE-28, evidencia **VET-11**)
 
-La fuente obligatoria es la página oficial en inglés (valor fijado en `preop_rag/config.py` como `OFFICIAL_PREOP_DOC_URL`); no se sustituye por un PDF genérico. Al arrancar FastAPI (`main.py`), se descarga esa URL, se extrae texto útil, se trocea, se generan embeddings y se construye un **vector store en memoria**; en cada `POST /chat`, `POST /ask_bot` y `POST /askbot` se recuperan los fragmentos más similares a la pregunta y se añaden al *system prompt* bajo el bloque `--- Retrieved pre-operative reference excerpts ---`.
+La fuente obligatoria es la **página oficial en inglés** del caso (no un PDF genérico). La URL canónica está fijada en código como constante única:
+
+| Referencia | Valor |
+| ---------- | ----- |
+| Constante | `OFFICIAL_PREOP_DOC_URL` en [`preop_rag/config.py`](preop_rag/config.py) |
+| URL | [https://veterinary-clinic-teal.vercel.app/en/docs/instructions-before-operation](https://veterinary-clinic-teal.vercel.app/en/docs/instructions-before-operation) |
+
+Al arrancar FastAPI (`main.py`), el *worker* de arranque llama a `load_preop_rag_index()` ([`preop_rag/runtime.py`](preop_rag/runtime.py)): se resuelve la URL efectiva (`PREOP_RAG_LIVE_URL` si está definida en entorno; **si no**, la URL oficial anterior), se descarga el HTML, se extrae texto ([`preop_rag/extract.py`](preop_rag/extract.py) — cada documento/chunk lleva `metadata["source"]` = esa URL), se trocea, se generan embeddings y se construye un **vector store en memoria**. En cada `POST /chat`, `POST /ask_bot` y `POST /askbot`, [`llm_service.py`](llm_service.py) recupera los fragmentos más similares y los añade al *system prompt* bajo el bloque `--- Retrieved pre-operative reference excerpts ---`.
 
 ```mermaid
 flowchart TD
@@ -102,13 +109,38 @@ flowchart TD
   H --> I[ChatOpenAI]
 ```
 
+#### VET-11 (+1 RAG): qué aportar como evidencia
+
+Criterio alineado con [docs/conversaciones-aceptacion-chatbot.md](docs/conversaciones-aceptacion-chatbot.md) (conv. 10 / guion de ayuno preoperatorio):
+
+1. **Ingesta desde la URL oficial** — La constante `OFFICIAL_PREOP_DOC_URL` apunta a la página anterior; el índice se construye con el HTML obtenido de esa URL (salvo *override* explícito `PREOP_RAG_LIVE_URL` para *staging*, documentado en [`.env.example`](.env.example)).
+2. **Retriever observable** — Tras un arranque exitoso, el log del proceso incluye una línea `INFO` del logger `preop_rag.runtime`: `Pre-op RAG index ready (source=<URL>, chunks=N, fake_embeddings=...)`, donde `<URL>` coincide con la URL efectivamente indexada.
+3. **Comprobación en código** — `get_indexed_preop_source_url()` en `preop_rag/runtime.py` devuelve la URL usada para el índice en memoria (o `None` si no hubo índice).
+4. **Pruebas automáticas** — `pytest tests/test_preop_config.py` fija la URL oficial esperada; `tests/test_preop_pipeline.py` comprueba que los chunks conservan `metadata["source"]` igual a esa URL; `tests/test_preop_runtime.py` comprueba que, sin override de entorno, tras cargar el índice la URL indexada es la oficial. Con red: `RUN_PREOP_RAG_LIVE=1 pytest -m preop_live` valida *fetch* real e índice contra la misma URL.
+5. **Demo CLI** — `python -m preop_rag.demo` imprime en *stderr* `source_url=...` (misma resolución que el runtime).
+
 - **Config** (chunk size, overlap, `TOP_K_RESULTS`, embedding model, source URL, `PREOP_RAG_CONFIG_VERSION`): `preop_rag/config.py`.
 - **Variables:** `PREOP_RAG_LIVE_URL` (solo override opcional), `PREOP_RAG_FAKE_EMBEDDINGS=1` para índice local sin `OPENAI_API_KEY` (desarrollo / pruebas). Sin clave y sin *fake*, el chat sigue funcionando **sin** RAG.
 - **Errores:** si la URL no responde, las preguntas que parecen de preoperatorio devuelven el texto fijado en código: *«No se pudo acceder a la fuente de información preoperatoria. Por favor, inténtalo de nuevo.»* El resto de temas siguen con el LLM sin fragmentos recuperados.
 - **Demo local (solo pipeline):** `python -m preop_rag.demo` (con clave) o `python -m preop_rag.demo --fake-embeddings`.
-- **Tests:** `pytest` — *fixtures* HTML + vector store en memoria (`tests/test_preop_*.py`). Opcional con red: `RUN_PREOP_RAG_LIVE=1 pytest -m preop_live`. La salida de `pytest` en CI o local sirve como **evidencia** de verificación (VE-28).
+- **Tests:** `pytest tests/test_preop_*.py` (evidencia VET-11 + VE-28). Opcional con red: `RUN_PREOP_RAG_LIVE=1 pytest -m preop_live`.
 
-**Preguntas de prueba manual** (servidor en marcha, `OPENAI_API_KEY` y red; la respuesta debe basarse en el contenido recuperado de la URL oficial, no inventada):
+**Conv. 10 — guion de aceptación (inglés)** — Con el servidor en marcha, RAG activo (`OPENAI_API_KEY` o `PREOP_RAG_FAKE_EMBEDDINGS=1` con *fetch* OK). Comprueba que la respuesta refleja el contenido de la página oficial (p. ej. ayuno y agua); en depuración, verifica que el *system prompt* del modelo incluye `Retrieved pre-operative reference excerpts`.
+
+| Turno | Qué comprobar |
+| ----- | ------------- |
+| 1 | «How long should my dog fast before the operation?» → ventana de ayuno y tono acorde al doc. |
+| 2 | «Can he drink water right up until we leave home?» → política de agua coherente con el doc o excerpts. |
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/chat -H "Content-Type: application/json" \
+  -d "{\"msg\": \"How long should my dog fast before the operation?\", \"session_id\": \"accept-rag-10a\"}"
+
+curl -s -X POST http://127.0.0.1:8000/chat -H "Content-Type: application/json" \
+  -d "{\"msg\": \"Can he drink water right up until we leave home?\", \"session_id\": \"accept-rag-10a\"}"
+```
+
+**Preguntas de prueba manual (español, mismo pipeline)** — servidor en marcha; la respuesta debe basarse en el contenido recuperado de la URL oficial cuando el RAG está activo:
 
 | # | Pregunta (resumen) | Qué comprobar en la respuesta |
 | --- | --- | --- |
