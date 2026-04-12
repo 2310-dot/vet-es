@@ -6,9 +6,11 @@ OpenAI credentials and prompt loading stay in one place.
 VE-25: **tool-free** conversational path only — ``ChatOpenAI`` with message
 history from :mod:`conversation_memory`. No ``bind_tools``, no agents.
 
-The base system instructions are read from ``prompt.md`` in the repository
-root (same directory as ``main.py`` and this module):
-``Path(__file__).resolve().parent / "prompt.md"``.
+The long system prompt is **not** inlined in Python. It is read at runtime from
+``prompt.md`` in the repository root (next to ``main.py``). The brief pointer
+:data:`SYSTEM_PROMPT_SOURCE_REF` documents that the definitive advanced prompt
+for the ENAE case lives in course deliverables and that ``prompt.md`` is the
+in-repo working copy to keep aligned.
 
 :class:`ClinicChat` exposes ``await clinic_chat.ainvoke(input, config)`` where
 ``config`` is ``{"configurable": {"session_id": "<id>"}}``; the return value is
@@ -30,6 +32,14 @@ logger = logging.getLogger(__name__)
 
 # Repo root-relative file (this module lives next to main.py).
 SYSTEM_PROMPT_FILE = Path(__file__).resolve().parent / "prompt.md"
+
+# Placeholder / pointer only (ticket AC): do not paste the full advanced prompt here.
+# Runtime instructions are loaded from ``SYSTEM_PROMPT_FILE``; keep that file aligned
+# with the canonical prompt in the ENAE case course materials.
+SYSTEM_PROMPT_SOURCE_REF = (
+    "Definitive advanced system prompt: ENAE case course deliverables. "
+    "Working copy for this API: prompt.md (repository root, next to main.py), loaded at runtime."
+)
 
 
 class LlmConfigurationError(Exception):
@@ -70,6 +80,9 @@ clinic_chat = ClinicChat()
 
 def load_system_prompt() -> str:
     """Load and validate the markdown system prompt from ``prompt.md``.
+
+    See :data:`SYSTEM_PROMPT_SOURCE_REF` for the documented split between course
+    materials (canonical advanced prompt) and this file (operational copy).
 
     :return: Non-empty stripped system prompt text.
     :raises LlmConfigurationError: If the file is missing or empty.
