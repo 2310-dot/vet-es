@@ -82,8 +82,22 @@
       return;
     }
 
+    if (window.location.protocol === "file:") {
+      showError(
+        errEl,
+        "This page was opened as a local file (file://). Open it from the API instead, " +
+          "e.g. http://127.0.0.1:8000/ after running: python -m uvicorn main:app --reload"
+      );
+      if (baseDisplay) {
+        baseDisplay.textContent = "(invalid — use http URL)";
+      }
+      return;
+    }
+
     var base = apiBase();
-    baseDisplay.textContent = base ? base : "(same origin)";
+    if (baseDisplay) {
+      baseDisplay.textContent = base ? base : "(same origin)";
+    }
 
     form.addEventListener("submit", function (ev) {
       ev.preventDefault();

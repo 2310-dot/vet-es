@@ -16,7 +16,7 @@ Chatbot y asistente de reservas para clínica veterinaria (caso ENAE). El backen
 | **Python**           | Servicios, APIs, cadenas/agentes LangChain.                                   |
 | **LangChain**        | Prompts, herramientas (citas, paciente, etc.), RAG sobre protocolos, memoria. |
 | **FastAPI**          | Capa HTTP/API del bot.                                                        |
-| **Canal / frontend** | **TBD** — web, WhatsApp u otro; pendiente de decisión.                        |
+| **Canal / frontend** | Demo web estática (`static/chat.html` + JS) servida por FastAPI en `GET /`.   |
 
 
 Detalle de implementación: [.cursor/skills/langchain-vet-chatbots/SKILL.md](.cursor/skills/langchain-vet-chatbots/SKILL.md), [.cursor/agents/backend-langchain-vet.md](.cursor/agents/backend-langchain-vet.md).
@@ -67,7 +67,11 @@ python -m uvicorn main:app --reload
 - OpenAPI: [http://127.0.0.1:8000/openapi.json](http://127.0.0.1:8000/openapi.json)
 - API rápida: `GET /health` (JSON), `POST /chat` (cuerpo JSON `msg` + `session_id`), legado `POST /ask_bot` (form urlencoded).
 
-**Demo de chat en el navegador (VE-19):** con la API en marcha, abre [http://127.0.0.1:8000/](http://127.0.0.1:8000/). Escribe un mensaje y pulsa Send; la UI llama a `POST /chat` en el mismo origen. Para apuntar a otro despliegue, edita **solo** `static/chat_config.js` (`window.CHATBOT_API_BASE`). Si el HTML se sirve desde otro origen que la API, define `CORS_ALLOW_ORIGINS` en el entorno (lista separada por comas; ver `.env.example`) y reinicia el servidor.
+**Demo de chat en el navegador (VE-19):**
+
+- **Local:** con `uvicorn` en marcha, abre la raíz del API en el navegador, p. ej. [http://127.0.0.1:8000/](http://127.0.0.1:8000/) (o el puerto que uses). Escribe un mensaje y pulsa **Send**; la UI hace `POST /chat` con JSON (`msg`, `session_id`). Si la petición falla (red, CORS, 4xx/5xx), verás un mensaje en el banner rojo encima del historial.
+- **URL base del API (solo front):** edita `static/chat_config.js` y asigna `window.CHATBOT_API_BASE`. Cadena vacía `""` = mismo origen que la página (caso típico local). Para otro backend, p. ej. `"https://tu-app.vercel.app"` (sin barra final). No hay lógica de negocio en el cliente más allá de enviar el mensaje y mostrar la respuesta.
+- **Despliegue (Vercel):** abre la **URL pública** del proyecto (raíz `/`), la misma que muestra el dashboard de Vercel como dominio de producción o preview — no el enlace al panel de Vercel. Ahí se sirve el mismo HTML; si sirves la UI desde otro origen que el de la API, configura `CORS_ALLOW_ORIGINS` en Vercel (lista separada por comas; ver `.env.example`).
 
 **Tests (opcional):** con el venv activo, `python -m pip install -r requirements-dev.txt` si aplica, luego `pytest`.
 
@@ -117,12 +121,6 @@ The chat model can call **`list_google_calendar_events`** (read-only) against **
 **OAuth scope (minimal):** `https://www.googleapis.com/auth/calendar.readonly` — listed here and in code so reviewers can confirm least privilege.
 
 **Manual check (AC7):** Configure env (no secrets in git), run the API, send a chat message that should trigger a calendar lookup (e.g. ask what is on the calendar in a window you seeded in the test calendar), or call the tool from a short Python snippet using the same `list_google_calendar_events_impl` as production.
-
----
-
-## Despliegue
-
-**TBD** — entorno de producción, CI/CD, hosting y secretos: por definir cuando exista pipeline.
 
 ---
 
@@ -192,7 +190,7 @@ Si añades documentos nuevos, enlázalos en **Enlaces relevantes** o en esta tab
 
 Definida en `main.py`:
 
-- **GET /** — HTML placeholder para futura UI.
+- **GET /** — HTML del demo de chat (`static/chat.html`).
 - **POST /ask_bot** — Cuerpo `application/x-www-form-urlencoded` (`msg`, `session_id`); respuesta JSON de prueba hasta integrar LangChain.
 
 ### Ejemplos
@@ -222,24 +220,9 @@ Respuesta esperada (stub):
 
 ## Despliegue
 
-**URL de producción:** `https://vercel.com/2310-dots-projects/vet-es`
+**Panel del proyecto (Vercel):** [2310-dots-projects/vet-es](https://vercel.com/2310-dots-projects/vet-es)
 
-### Procedimiento
+El proyecto se despliega en **Vercel** al hacer push o merge a `main`. Cada PR genera un **deployment preview** con su propia URL.
 
-El proyecto se despliega automáticamente en Vercel al hacer push o merge
-sobre la rama `main`.
-
-- **Plataforma:** Vercel
-- **Rama de producción:** `main`
-- **Builds de preview:** generados automáticamente para cada Pull Request
-
-### Variables de entorno
-
-Las variables de entorno se gestionan **únicamente en el panel de Vercel**
-(`Settings → Environment Variables`). No existe ningún `.env` commiteado.
-
-Para desarrollo local, copiar `.env.example` y rellenar los valores:
-
-```bash
-cp .env.example .env.local
-```
+- **Abrir la UI de chat en producción o preview:** usa la URL pública del deployment (dominio `*.vercel.app` o dominio custom), ruta `/`. Es la misma app FastAPI que en local; el chat sigue en la raíz.
+- **Variables de entorno:** solo en Vercel (`Settings → Environment Variables`). No se commitea `.env`. Para local, copia `.env.example` a `.env` y rellena valores (p. ej. `OPENAI_API_KEY`, `CORS_ALLOW_ORIGINS` si aplica).
