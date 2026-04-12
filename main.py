@@ -1,7 +1,9 @@
-"""Clinic chatbot API: GET / (HTML demo), GET /health, POST /chat (JSON), POST /ask_bot."""
+"""Clinic chatbot API: HTML demo, health, chat, ask_bot, VE-25 ``/public`` and ``/askbot``."""
 
 from __future__ import annotations
 
+import json
+import mimetypes
 import os
 from pathlib import Path
 from urllib.parse import parse_qs
@@ -10,22 +12,24 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
+from starlette.responses import FileResponse
 
 from conversation_memory import record_exchange
 from llm_service import (
     LlmConfigurationError,
     LlmUpstreamError,
-    invoke_chat_llm,
+    clinic_chat,
 )
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+PUBLIC_DIR = Path(__file__).resolve().parent / "public"
 
 app = FastAPI(
     title="Chatbot v4",
     version="0.1.0",
     description=(
-        "Clinic chatbot API: HTML demo on /, JSON POST /chat, "
-        "form POST /ask_bot (LangChain + OpenAI via llm_service), GET /health."
+        "GET / (HTML), POST /chat (JSON), POST /ask_bot (urlencoded), POST /askbot (JSON or "
+        "urlencoded, VE-25), GET /public/{path}, GET /health, /static."
     ),
 )
 
@@ -121,14 +125,77 @@ async def health() -> HealthResponse:
     return HealthResponse(status="ok")
 
 
-async def _assistant_reply(user_text: str, session_id: str) -> AskBotResponse:
-    """Call the central LLM entrypoint, record the exchange in memory, and map errors to HTTP responses."""
+def _safe_public_path(relative: str) -> Path | None:
+    """Resolve *relative* under ``PUBLIC_DIR``; return the path only if it is a safe file."""
+    if not relative.strip():
+        return None
+    base = PUBLIC_DIR.resolve()
+    if not base.is_dir():
+        return None
+    candidate = (PUBLIC_DIR / relative).resolve()
     try:
-        reply = await invoke_chat_llm(user_text, session_id)
+        candidate.relative_to(base)
+    except ValueError:
+        return None
+    if not candidate.is_file():
+        return None
+    return candidate
+
+
+@app.get(
+    "/public/{resource_path:path}",
+    summary="Public file",
+)
+async def serve_public(resource_path: str) -> FileResponse:
+    """Serve files from ``public/`` with path traversal protection (VE-25)."""
+    path = _safe_public_path(resource_path)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    media_type, _ = mimetypes.guess_type(str(path))
+    return FileResponse(path, media_type=media_type or "application/octet-stream")
+
+
+async def _parse_askbot_body(request: Request) -> tuple[str, str]:
+    """Parse VE-25 ``/askbot`` body as JSON or urlencoded (no multipart)."""
+    ct_raw = (request.headers.get("content-type") or "").lower()
+    body = await request.body()
+    if "application/json" in ct_raw:
+        if not body.strip():
+            raise HTTPException(status_code=422, detail="Empty JSON body")
+        try:
+            data = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=422, detail="Invalid JSON body") from exc
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=422, detail="JSON body must be an object")
+        raw_msg = data.get("msg", "")
+        raw_sid = data.get("session_id", "")
+        return (
+            "" if raw_msg is None else str(raw_msg),
+            "" if raw_sid is None else str(raw_sid),
+        )
+    if "application/x-www-form-urlencoded" in ct_raw:
+        fields = _parse_urlencoded_body(body)
+        return fields.get("msg", ""), fields.get("session_id", "")
+    raise HTTPException(
+        status_code=415,
+        detail=(
+            "Content-Type must be application/json or "
+            "application/x-www-form-urlencoded"
+        ),
+    )
+
+
+async def _assistant_reply(user_text: str, session_id: str) -> AskBotResponse:
+    """Call :data:`clinic_chat` with session config, record the turn, map LLM errors to HTTP."""
+    config = {"configurable": {"session_id": session_id}}
+    try:
+        result = await clinic_chat.ainvoke(user_text, config)
     except LlmConfigurationError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except LlmUpstreamError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    reply = result.content if isinstance(result.content, str) else str(result.content)
     turn_count = record_exchange(session_id, user_text, reply)
     return AskBotResponse(
         msg=reply,
@@ -144,8 +211,51 @@ async def _assistant_reply(user_text: str, session_id: str) -> AskBotResponse:
     response_model=AskBotResponse,
 )
 async def chat(body: ChatRequest) -> AskBotResponse:
-    """JSON chat: delegates to :func:`llm_service.invoke_chat_llm` and records memory."""
+    """JSON chat: delegates to :data:`clinic_chat` and records memory."""
     return await _assistant_reply(body.msg, body.session_id)
+
+
+@app.post(
+    "/askbot",
+    summary="Ask bot (VE-25)",
+    response_model=AskBotResponse,
+    openapi_extra={
+        "requestBody": {
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["msg", "session_id"],
+                        "properties": {
+                            "msg": {"type": "string"},
+                            "session_id": {"type": "string"},
+                        },
+                    }
+                },
+                "application/x-www-form-urlencoded": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "msg": {"type": "string"},
+                            "session_id": {"type": "string"},
+                        },
+                    }
+                },
+            }
+        }
+    },
+)
+async def askbot(request: Request) -> AskBotResponse:
+    """JSON or urlencoded chat with strict ``msg`` / ``session_id`` validation (VE-25)."""
+    msg_raw, session_raw = await _parse_askbot_body(request)
+    msg = msg_raw.strip()
+    session_id = session_raw.strip()
+    if not msg or not session_id:
+        raise HTTPException(
+            status_code=422,
+            detail="msg and session_id must be present and non-empty after trimming.",
+        )
+    return await _assistant_reply(msg, session_id)
 
 
 def _parse_urlencoded_body(body_bytes: bytes) -> dict[str, str]:

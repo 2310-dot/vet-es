@@ -1,43 +1,35 @@
-"""Central LLM call for the clinic chatbot (VE-20, VE-24).
+"""Central LLM call for the clinic chatbot (VE-20, VE-25).
 
-FastAPI handlers for ``POST /chat`` and ``POST /ask_bot`` delegate to
-:func:`invoke_chat_llm` so OpenAI credentials and prompt loading stay in one
-place.
+FastAPI handlers delegate to :func:`invoke_chat_llm` or :data:`clinic_chat` so
+OpenAI credentials and prompt loading stay in one place.
 
-Tools (VE-24): mock Tetris availability (VE-23) and Google Calendar read-only
-listing are bound on the chat model; the server runs a short tool-calling loop
-until the model returns a plain text reply.
+VE-25: **tool-free** conversational path only — ``ChatOpenAI`` with message
+history from :mod:`conversation_memory`. No ``bind_tools``, no agents.
 
 The base system instructions are read from ``prompt.md`` in the repository
 root (same directory as ``main.py`` and this module):
 ``Path(__file__).resolve().parent / "prompt.md"``.
+
+:class:`ClinicChat` exposes ``await clinic_chat.ainvoke(input, config)`` where
+``config`` is ``{"configurable": {"session_id": "<id>"}}``; the return value is
+an :class:`~langchain_core.messages.AIMessage` with a string ``.content``.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 from pathlib import Path
 
-from langchain_core.messages import (
-    AIMessage,
-    HumanMessage,
-    SystemMessage,
-    ToolMessage,
-)
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
-from availability_mock_tool import mock_tetris_booking_tools
 from conversation_memory import session_messages_copy
-from google_calendar_tool import google_calendar_tools, safe_json_for_tool_message
 
 logger = logging.getLogger(__name__)
 
 # Repo root-relative file (this module lives next to main.py).
 SYSTEM_PROMPT_FILE = Path(__file__).resolve().parent / "prompt.md"
-
-_MAX_TOOL_ROUNDS = 10
 
 
 class LlmConfigurationError(Exception):
@@ -46,6 +38,34 @@ class LlmConfigurationError(Exception):
 
 class LlmUpstreamError(Exception):
     """The LLM provider failed or returned unusable output."""
+
+
+class ClinicChat:
+    """Runnable-style entry point for HTTP layers (VE-25).
+
+    ``await clinic_chat.ainvoke(user_text, config)`` returns an ``AIMessage``
+    whose ``content`` is the assistant reply string.
+    """
+
+    async def ainvoke(self, input: str, config: dict | None = None) -> AIMessage:
+        """Run one user turn; ``config["configurable"]["session_id"]`` keys history."""
+        cfg = config or {}
+        configurable = cfg.get("configurable") or {}
+        raw_sid = configurable.get("session_id")
+        session_id: str | None
+        if raw_sid is None:
+            session_id = None
+        else:
+            session_id = str(raw_sid).strip() or None
+        text = await invoke_chat_llm(input, session_id)
+        return AIMessage(content=text)
+
+    async def invoke(self, input: str, config: dict | None = None) -> AIMessage:
+        """Alias for :meth:`ainvoke` (async API)."""
+        return await self.ainvoke(input, config)
+
+
+clinic_chat = ClinicChat()
 
 
 def load_system_prompt() -> str:
@@ -80,8 +100,13 @@ def _chat_model_name() -> str:
     return name or "gpt-4o-mini"
 
 
-def _chat_tools() -> list:
-    return [*mock_tetris_booking_tools(), *google_calendar_tools()]
+def _llm_debug_errors_enabled() -> bool:
+    """When true, :exc:`LlmUpstreamError` includes the underlying exception."""
+    return os.environ.get("LLM_DEBUG_ERRORS", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
 
 
 def _extract_text_content(message: AIMessage) -> str:
@@ -103,7 +128,7 @@ async def invoke_chat_llm(
     user_message: str,
     session_id: str | None = None,
 ) -> str:
-    """Run a user turn with optional session history and tool calling.
+    """Run a user turn with optional session history (no tools).
 
     Reads ``OPENAI_API_KEY`` from the environment only. Does not log secrets.
 
@@ -115,14 +140,11 @@ async def invoke_chat_llm(
     """
     system_text = load_system_prompt()
     api_key = _require_openai_api_key()
-    tools = _chat_tools()
-    tool_by_name = {t.name: t for t in tools}
     model = ChatOpenAI(
         api_key=api_key,
         model=_chat_model_name(),
         temperature=0.2,
     )
-    bound = model.bind_tools(tools)
 
     messages: list = [SystemMessage(content=system_text)]
     if session_id is not None:
@@ -134,62 +156,21 @@ async def invoke_chat_llm(
     messages.append(HumanMessage(content=user_message))
 
     try:
-        for _ in range(_MAX_TOOL_ROUNDS):
-            result = await bound.ainvoke(messages)
-            if not isinstance(result, AIMessage):
-                raise LlmUpstreamError(
-                    "The assistant returned an unexpected response type."
-                )
-            messages.append(result)
-            tool_calls = getattr(result, "tool_calls", None) or []
-            if not tool_calls:
-                text = _extract_text_content(result)
-                if not text:
-                    raise LlmUpstreamError(
-                        "The assistant returned an empty response."
-                    )
-                return text
-            for call in tool_calls:
-                if isinstance(call, dict):
-                    name = str(call.get("name", "") or "")
-                    args = call.get("args", {}) or {}
-                    tid = str(call.get("id", "") or "")
-                else:
-                    name = str(getattr(call, "name", "") or "")
-                    args = getattr(call, "args", {}) or {}
-                    tid = str(getattr(call, "id", "") or "")
-                tool_obj = tool_by_name.get(name)
-                if tool_obj is None:
-                    payload = {
-                        "ok": False,
-                        "error": {"code": "UNKNOWN_TOOL", "message": name},
-                    }
-                else:
-                    try:
-                        payload = tool_obj.invoke(args)
-                    except Exception:
-                        logger.exception("Tool invocation failed (%s)", name)
-                        payload = {
-                            "ok": False,
-                            "error": {
-                                "code": "TOOL_EXCEPTION",
-                                "message": "Tool execution failed.",
-                            },
-                        }
-                messages.append(
-                    ToolMessage(
-                        content=safe_json_for_tool_message(payload),
-                        tool_call_id=tid,
-                    )
-                )
+        result = await model.ainvoke(messages)
+        if not isinstance(result, AIMessage):
+            raise LlmUpstreamError(
+                "The assistant returned an unexpected response type."
+            )
+        text = _extract_text_content(result)
+        if not text:
+            raise LlmUpstreamError("The assistant returned an empty response.")
+        return text
     except LlmUpstreamError:
         raise
     except Exception as exc:
-        logger.error("LLM provider call failed (%s)", type(exc).__name__)
+        logger.exception("LLM provider failed")
+        if _llm_debug_errors_enabled():
+            raise LlmUpstreamError(f"{type(exc).__name__}: {exc}") from exc
         raise LlmUpstreamError(
             "The assistant is temporarily unavailable. Please try again later."
         ) from None
-
-    raise LlmUpstreamError(
-        "The assistant stopped after too many tool calls; please try again."
-    )
