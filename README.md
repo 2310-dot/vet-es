@@ -1,51 +1,127 @@
 # Vet-es (enae-vet-es)
 
-**Punto único de entrada** al repositorio: contexto del producto, enlaces operativos (Jira, código), cómo levantar el entorno local y dónde profundizar. Lee primero las secciones **Proyecto → Jira → Setup local** (unos minutos); el resto sirve para reglas de negocio, API y flujos de trabajo en Cursor.
+Chatbot y asistente de reservas para clínica veterinaria (caso final ENAE): orienta a citación, FAQs y procedimientos internos; **no diagnostica ni prescribe**.
 
-**Repositorio en GitHub:** [2310-dot/vet-es](https://github.com/2310-dot/vet-es)
-
----
-
-## Proyecto
-
-Chatbot y asistente de reservas para clínica veterinaria (caso ENAE). El backend previsto es **Python**, **LangChain** / LangGraph, **FastAPI**; el bot no diagnostica ni prescribe: orienta a citación, FAQs y procedimientos internos, citando herramientas o documentos recuperados.
-
-
-| Tecnología           | Rol                                                                           |
-| -------------------- | ----------------------------------------------------------------------------- |
-| **Python**           | Servicios, APIs, cadenas/agentes LangChain.                                   |
-| **LangChain**        | Prompts, herramientas (citas, paciente, etc.), RAG sobre protocolos, memoria. |
-| **FastAPI**          | Capa HTTP/API del bot.                                                        |
-| **Canal / frontend** | Demo web estática (`static/chat.html` + JS) servida por FastAPI en `GET /`.   |
-
-
-Detalle de implementación: [.cursor/skills/langchain-vet-chatbots/SKILL.md](.cursor/skills/langchain-vet-chatbots/SKILL.md), [.cursor/agents/backend-langchain-vet.md](.cursor/agents/backend-langchain-vet.md).
+**Enlaces rápidos:** [Repositorio GitHub — 2310-dot/vet-es](https://github.com/2310-dot/vet-es) · [Jira — resumen VE](https://eliuperez4.atlassian.net/jira/software/projects/VE/summary) · [Jira — issues / backlog](https://eliuperez4.atlassian.net/jira/software/projects/VE/issues) · [Vercel — panel del proyecto](https://vercel.com/2310-dots-projects/vet-es)
 
 ---
 
-## Equipo
+## Tabla de contenidos
 
+1. [Visión general del proyecto](#visión-general-del-proyecto)
+2. [Equipo y curso](#equipo-y-curso)
+3. [Arquitectura y stack](#arquitectura-y-stack)
+4. [Estructura del repositorio](#estructura-del-repositorio)
+5. [Requisitos previos](#requisitos-previos)
+6. [Instalación local](#instalación-local)
+7. [Variables de entorno](#variables-de-entorno)
+8. [Cómo ejecutar en local](#cómo-ejecutar-en-local)
+9. [Despliegue en Vercel](#despliegue-en-vercel)
+10. [Endpoints de la API](#endpoints-de-la-api)
+11. [Funcionalidades y rúbrica del caso](#funcionalidades-y-rúbrica-del-caso)
+12. [Documentación adicional](#documentación-adicional)
+13. [Cómo probar y verificar](#cómo-probar-y-verificar)
+14. [Backlog y trazabilidad Jira](#backlog-y-trazabilidad-jira)
+15. [Notas de seguridad](#notas-de-seguridad)
+
+---
+
+## Visión general del proyecto
+
+**MVP:** reducir fricción al agendar **esterilización / castración** en una clínica veterinaria: conversación → elección de día (sin hora quirúrgica para el cliente), reglas de capacidad y ventanas de ingreso, confirmación con ayuno y entrega.
+
+Flujo de negocio (alineado con `docs/`):
+
+1. Conversación → intención y datos necesarios.
+2. Solo **día**; no se pide hora quirúrgica al cliente.
+3. Reglas de capacidad: cuota **240 minutos** diarios, límite de perros, tiempos desde configuración o dominio.
+4. Ventanas de ingreso: gatos 08:00–09:00; perros 09:00–10:30. Horarios quirúrgicos internos no se muestran al cliente.
+5. Confirmación: ingreso + ayuno (última comida 8–12 h antes; agua hasta 1–2 h antes, según política).
+
+---
+
+## Equipo y curso
 
 | Rol / área                            | Contacto / notas              |
 | ------------------------------------- | ----------------------------- |
 | Autor / mantenedor                    | Eliu Salvador Pérez Tantaleán |
-| Otros roles (PM, revisores, rotación) | **TBD**                       |
-
-
----
-
-## Jira
-
-Proyecto **Vet-es** en Atlassian (enlaces clicables):
-
-- [Resumen del proyecto VE](https://eliuperez4.atlassian.net/jira/software/projects/VE/summary)
-- [Lista de issues / backlog](https://eliuperez4.atlassian.net/jira/software/projects/VE/issues)
+| Curso / contexto académico            | ENAE — *Data Science e IA para la Toma de Decisiones* (caso clínica veterinaria) |
+| Otros roles (PM, revisores, rotación) | **TBD por completar por el equipo** |
 
 ---
 
-## Setup local
+## Arquitectura y stack
 
-Requisitos: **Python 3** compatible con las dependencias de `requirements.txt`.
+| Tecnología           | Rol                                                                           |
+| -------------------- | ----------------------------------------------------------------------------- |
+| **Python**           | Servicios, APIs, cadenas/agentes LangChain.                                   |
+| **LangChain**        | Prompts, herramientas (disponibilidad, calendario), RAG preoperatorio, memoria. |
+| **FastAPI**          | Capa HTTP/API del bot.                                                        |
+| **OpenAI**           | Modelo de chat vía `langchain-openai` (clave solo en entorno).                |
+| **Canal / frontend** | Demo web estática (`static/chat.html` + JS) servida en `GET /`.               |
+| **Vercel**           | Despliegue serverless (Git → producción / preview).                           |
+
+Detalle de patrones (prompts, tools, RAG, memoria): [.cursor/skills/langchain-vet-chatbots/SKILL.md](.cursor/skills/langchain-vet-chatbots/SKILL.md), [.cursor/agents/backend-langchain-vet.md](.cursor/agents/backend-langchain-vet.md).
+
+```mermaid
+flowchart LR
+  subgraph Cliente
+    UI[static/chat.html + JS]
+  end
+  subgraph API[FastAPI]
+    RUT[Rutas /chat, /ask_bot, /askbot]
+  end
+  subgraph Agente[LangChain]
+    MEM[Memoria por session_id]
+    TOOL[Tools: disponibilidad, calendario]
+    LLM[ChatOpenAI + prompt.md]
+  end
+  subgraph Fuentes
+    RAG[Pre-op RAG en memoria]
+    GCal[Google Calendar API opcional]
+  end
+  UI --> RUT
+  RUT --> LLM
+  LLM --> MEM
+  LLM --> TOOL
+  TOOL --> GCal
+  LLM --> RAG
+```
+
+---
+
+## Estructura del repositorio
+
+```text
+vet-es/
+├── main.py                 # FastAPI: rutas, CORS, estáticos
+├── llm_service.py          # Orquestación LLM, RAG, tools
+├── conversation_memory.py  # Memoria en proceso por sesión
+├── prompt.md               # System prompt operativo
+├── google_calendar_tool.py # Lectura Calendar API (VE-24 / VE-30)
+├── preop_rag/              # Ingesta HTML, chunks, índice vectorial en memoria
+├── tools/                  # p. ej. check_surgical_availability (VE-29 / VE-30)
+├── static/                 # Demo chat (VE-19)
+├── public/                 # Archivos públicos bajo GET /public/ (VE-25)
+├── scripts/                # p. ej. OAuth refresh token
+├── tests/                  # pytest
+├── docs/                   # Reglas de negocio, aceptación, Jira exports, evidencias
+├── api/                    # Entrada Vercel → app
+├── .env.example            # Plantilla de variables (no secretos reales)
+└── vercel.json             # Configuración de despliegue
+```
+
+---
+
+## Requisitos previos
+
+- **Python 3** compatible con `requirements.txt`.
+- Cuenta OpenAI y clave para ejecutar el chat en condiciones reales (o modo fake embeddings para RAG en desarrollo; ver [.env.example](.env.example)).
+- Opcional: proyecto Google Cloud + OAuth para `list_google_calendar_events` y modo Google de disponibilidad (VE-24 / VE-30).
+
+---
+
+## Instalación local
 
 ```bash
 python -m venv .venv
@@ -56,46 +132,114 @@ Activa el entorno virtual:
 - **Windows (PowerShell):** `.venv\Scripts\Activate.ps1`
 - **Linux / macOS:** `source .venv/bin/activate`
 
-Instala dependencias y arranca la API (`main.py`):
-
 ```bash
 python -m pip install -r requirements.txt
+```
+
+Tests (opcional): `python -m pip install -r requirements-dev.txt` y luego `pytest`.
+
+---
+
+## Variables de entorno
+
+Referencia canónica: [.env.example](.env.example). No subir `.env` al repositorio; en Vercel, solo el panel de variables.
+
+| Variable | Obligatoria | Descripción | Ejemplo (sin valores reales) |
+| -------- | ----------- | ----------- | ---------------------------- |
+| `OPENAI_API_KEY` | Sí, para respuestas LLM en `/chat`, `/ask_bot`, `/askbot` | Clave API OpenAI | `sk-proj-…` (ver plantilla en `.env.example`) |
+| `OPENAI_CHAT_MODEL` | No | Modelo de chat | `gpt-4o-mini` |
+| `LLM_DEBUG_ERRORS` | No | Solo depuración local; no producción | `0` |
+| `PORT` | No | Puerto local Uvicorn | `8000` |
+| `FRONTEND_URL` | No | Origen documentado para CORS / front | `http://localhost:3000` |
+| `CORS_ALLOW_ORIGINS` | No | Lista separada por comas; si vacía, CORS extra desactivado | `http://127.0.0.1:5500,http://localhost:5500` |
+| `RAG_SOURCE_URL` | No | Placeholder genérico en plantilla; el RAG preoperatorio usa URL fijada en código | `https://example.invalid/...` |
+| `PREOP_RAG_LIVE_URL` | No | Override de URL para pruebas; por defecto `OFFICIAL_PREOP_DOC_URL` en código | Ver comentario en `.env.example` |
+| `PREOP_RAG_FAKE_EMBEDDINGS` | No | `1` = embeddings deterministas sin llamar OpenAI para índice | `1` |
+| `RUN_PREOP_RAG_LIVE` | No | Solo para pytest con red | `1` |
+| `CLINIC_PHONE` / `CLINIC_EMAIL` | No | Inyección opcional en system prompt | *(vacío)* |
+| `CHAT_MEMORY_MAX_TURNS` | No | Máx. pares usuario→asistente por sesión | `50` |
+| `CHAT_MEMORY_TTL_SECONDS` | No | TTL de sesión en memoria; `0` = sin TTL por tiempo | `0` |
+| `GOOGLE_CALENDAR_ID` | Condicional (Google en vivo) | Calendario a consultar | `primary` |
+| `GOOGLE_CALENDAR_CLIENT_ID` | Condicional | OAuth client ID | *(ver consola Google)* |
+| `GOOGLE_CALENDAR_CLIENT_SECRET` | Condicional | OAuth client secret | *(ver consola Google)* |
+| `GOOGLE_CALENDAR_REFRESH_TOKEN` | Condicional | Token obtenido con `scripts/get_google_token.py` | *(no commitear)* |
+| `GOOGLE_CALENDAR_HTTP_TIMEOUT_SECONDS` | No | Timeout HTTP API Calendar | `30` |
+| `GOOGLE_CALENDAR_USE_STUB` | No | `1` / `true` = stub y mock de disponibilidad sin Google | `0` |
+
+**Demo en navegador (VE-19):** el HTML no lee `.env`. La base del API en el cliente está en `static/chat_config.js` → `window.CHATBOT_API_BASE` (`""` = mismo origen).
+
+**Memoria de sesión (VE-21):** el `session_id` viaja en el cuerpo (`POST /chat` JSON; `/ask_bot` y `/askbot` form o JSON). La demo guarda un UUID en `sessionStorage` ([static/chat.js](static/chat.js)). Claves **sensibles a mayúsculas**; sin persistencia en disco (reinicio del proceso borra el historial).
+
+---
+
+## Cómo ejecutar en local
+
+```bash
 python -m uvicorn main:app --reload
 ```
 
-**Cliente LLM (backend):** las dependencias OpenAI vía LangChain están en `requirements.txt` (`langchain-openai`, `langchain-core`, etc.). La clave **solo** se obtiene del entorno (`OPENAI_API_KEY`); ver `.env.example` y [llm_service.py](llm_service.py).
-
 - Documentación interactiva: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 - OpenAPI: [http://127.0.0.1:8000/openapi.json](http://127.0.0.1:8000/openapi.json)
-- API rápida: `GET /health` (JSON), `POST /chat` (JSON `msg` + `session_id`), `POST /ask_bot` (form urlencoded), `POST /askbot` (JSON o form).
+- Demo chat: [http://127.0.0.1:8000/](http://127.0.0.1:8000/)
 
-**Demo de chat en el navegador (VE-19):**
+Con `OPENAI_API_KEY` y `prompt.md`, las rutas de chat devuelven texto del modelo (`placeholder: false`). Sin clave: **503**. Fallo proveedor: **502**. Errores de validación (`422` / `415`) no escriben en memoria.
 
-- **Local:** con `uvicorn` en marcha, abre la raíz del API en el navegador, p. ej. [http://127.0.0.1:8000/](http://127.0.0.1:8000/) (o el puerto que uses). Escribe un mensaje y pulsa **Send**; la UI hace `POST /chat` con JSON (`msg`, `session_id`). Si la petición falla (red, CORS, 4xx/5xx), verás un mensaje en el banner rojo encima del historial.
-- **URL base del API (solo front):** edita `static/chat_config.js` y asigna `window.CHATBOT_API_BASE`. Cadena vacía `""` = mismo origen que la página (caso típico local). Para otro backend, p. ej. `"https://tu-app.vercel.app"` (sin barra final). No hay lógica de negocio en el cliente más allá de enviar el mensaje y mostrar la respuesta.
-- **Despliegue (Vercel):** abre la **URL pública** del proyecto (raíz `/`), la misma que muestra el dashboard de Vercel como dominio de producción o preview — no el enlace al panel de Vercel. Ahí se sirve el mismo HTML; si sirves la UI desde otro origen que el de la API, configura `CORS_ALLOW_ORIGINS` en Vercel (lista separada por comas; ver `.env.example`).
+---
 
-**Propagación de `session_id` (memoria por sesión, VE-27):**
+## Despliegue en Vercel
 
-- **Mecanismo documentado en este repo:** el identificador viaja en el **cuerpo de la petición** (no cabecera `X-Session-ID`, ni cookie, ni query en el servidor).
-  - `POST /chat`: JSON `{"msg": "...", "session_id": "..."}` (`Content-Type: application/json`).
-  - `POST /ask_bot`: `application/x-www-form-urlencoded` con campos `msg` y `session_id`.
-  - `POST /askbot`: el mismo par en JSON o en formulario urlencoded (VE-25).
-- **Demo en navegador:** [static/chat.js](static/chat.js) obtiene o crea un UUID y lo guarda en `sessionStorage` bajo la clave `vet-es-chat-session-id` (una conversación por pestaña; datos de ejemplo, no persistidos en servidor salvo el buffer en memoria del proceso).
-- **Límite de contexto:** el backend **no** aplica un tope fijo de tokens al historial; recorta por **turnos** completos (pares usuario→asistente) con `CHAT_MEMORY_MAX_TURNS` (por defecto `50`). Ver tabla en [Variables de entorno → Session memory](#session-memory-ve-21--english).
+El proyecto se despliega en **Vercel** al hacer push o merge a `main`. Cada PR genera un **deployment preview** con su propia URL (`*.vercel.app` o dominio custom).
 
-**Tests (opcional):** con el venv activo, `python -m pip install -r requirements-dev.txt` si aplica, luego `pytest`.
+- **UI de chat en producción o preview:** URL pública del deployment, ruta `/` (misma app FastAPI que en local).
+- **Variables:** solo en Vercel (`Settings → Environment Variables`). Para local, copia `.env.example` a `.env`.
+- **Origen distinto al API:** configurar `CORS_ALLOW_ORIGINS` en Vercel (lista separada por comas).
 
-### Pre-op RAG (VE-22, integración VE-28, evidencia **VET-11**)
+---
 
-La fuente obligatoria es la **página oficial en inglés** del caso (no un PDF genérico). La URL canónica está fijada en código como constante única:
+## Endpoints de la API
+
+| Método | Ruta | Propósito |
+| ------ | ---- | --------- |
+| `GET` | `/` | HTML del demo de chat (`static/chat.html`). |
+| `GET` | `/health` | *Liveness* JSON (`{"status":"ok"}`). |
+| `GET` | `/static/...` | Ficheros estáticos (CSS/JS). |
+| `GET` | `/public/{path}` | Ficheros bajo `public/` con saneamiento de ruta (VE-25). |
+| `POST` | `/chat` | JSON `{"msg","session_id"}` → respuesta asistente + `turn_count`. |
+| `POST` | `/ask_bot` | `application/x-www-form-urlencoded` con `msg`, `session_id`. |
+| `POST` | `/askbot` | JSON o form urlencoded (VE-25); mismos campos. |
+
+Ejemplo rápido (puerto 8000):
+
+```bash
+curl -s http://127.0.0.1:8000/health
+
+curl -s -X POST http://127.0.0.1:8000/chat \
+  -H "Content-Type: application/json" \
+  -d "{\"msg\": \"¿En qué horario abren?\", \"session_id\": \"demo-curl\"}"
+```
+
+Cuerpo de respuesta típico: `msg`, `session_id`, `placeholder`, `turn_count`.
+
+---
+
+## Funcionalidades y rúbrica del caso
+
+### Base (memoria + system prompt + dominio)
+
+- **Memoria:** `conversation_memory` + `session_id` en las rutas de chat (VE-21); límite por turnos `CHAT_MEMORY_MAX_TURNS`.
+- **System prompt:** cargado desde [prompt.md](prompt.md); puntero en código: `SYSTEM_PROMPT_SOURCE_REF` en [llm_service.py](llm_service.py).
+- **Dominio:** esterilización/castración, ventanas de ingreso, límites de alcance (sin diagnóstico clínico).
+
+### RAG preoperatorio (VET-11, VE-22, VE-28)
+
+Fuente obligatoria del caso (inglés), fijada en código:
 
 | Referencia | Valor |
 | ---------- | ----- |
-| Constante | `OFFICIAL_PREOP_DOC_URL` en [`preop_rag/config.py`](preop_rag/config.py) |
+| Constante | `OFFICIAL_PREOP_DOC_URL` en [preop_rag/config.py](preop_rag/config.py) |
 | URL | [https://veterinary-clinic-teal.vercel.app/en/docs/instructions-before-operation](https://veterinary-clinic-teal.vercel.app/en/docs/instructions-before-operation) |
 
-Al arrancar FastAPI (`main.py`), el *worker* de arranque llama a `load_preop_rag_index()` ([`preop_rag/runtime.py`](preop_rag/runtime.py)): se resuelve la URL efectiva (`PREOP_RAG_LIVE_URL` si está definida en entorno; **si no**, la URL oficial anterior), se descarga el HTML, se extrae texto ([`preop_rag/extract.py`](preop_rag/extract.py) — cada documento/chunk lleva `metadata["source"]` = esa URL), se trocea, se generan embeddings y se construye un **vector store en memoria**. En cada `POST /chat`, `POST /ask_bot` y `POST /askbot`, [`llm_service.py`](llm_service.py) recupera los fragmentos más similares y los añade al *system prompt* bajo el bloque `--- Retrieved pre-operative reference excerpts ---`.
+Al arrancar, `load_preop_rag_index()` ([preop_rag/runtime.py](preop_rag/runtime.py)) construye un vector store en memoria; [llm_service.py](llm_service.py) inyecta fragmentos bajo `--- Retrieved pre-operative reference excerpts ---`.
 
 ```mermaid
 flowchart TD
@@ -104,33 +248,29 @@ flowchart TD
   C --> D[Chunk + overlap]
   D --> E[Embeddings]
   E --> F[InMemoryVectorStore]
-  F --> G[Similarity search per request]
-  G --> H[Inject excerpts into prompt]
+  F --> G[Similarity search por petición]
+  G --> H[Inyección en system prompt]
   H --> I[ChatOpenAI]
 ```
 
-#### VET-11 (+1 RAG): qué aportar como evidencia
+#### VET-11 (+1 RAG): evidencia
 
-Criterio alineado con [docs/conversaciones-aceptacion-chatbot.md](docs/conversaciones-aceptacion-chatbot.md) (conv. 10 / guion de ayuno preoperatorio):
+Criterio alineado con [docs/conversaciones-aceptacion-chatbot.md](docs/conversaciones-aceptacion-chatbot.md) (conv. 10 / ayuno preoperatorio):
 
-1. **Ingesta desde la URL oficial** — La constante `OFFICIAL_PREOP_DOC_URL` apunta a la página anterior; el índice se construye con el HTML obtenido de esa URL (salvo *override* explícito `PREOP_RAG_LIVE_URL` para *staging*, documentado en [`.env.example`](.env.example)).
-2. **Retriever observable** — Tras un arranque exitoso, el log del proceso incluye una línea `INFO` del logger `preop_rag.runtime`: `Pre-op RAG index ready (source=<URL>, chunks=N, fake_embeddings=...)`, donde `<URL>` coincide con la URL efectivamente indexada.
-3. **Comprobación en código** — `get_indexed_preop_source_url()` en `preop_rag/runtime.py` devuelve la URL usada para el índice en memoria (o `None` si no hubo índice).
-4. **Pruebas automáticas** — `pytest tests/test_preop_config.py` fija la URL oficial esperada; `tests/test_preop_pipeline.py` comprueba que los chunks conservan `metadata["source"]` igual a esa URL; `tests/test_preop_runtime.py` comprueba que, sin override de entorno, tras cargar el índice la URL indexada es la oficial. Con red: `RUN_PREOP_RAG_LIVE=1 pytest -m preop_live` valida *fetch* real e índice contra la misma URL.
-5. **Demo CLI** — `python -m preop_rag.demo` imprime en *stderr* `source_url=...` (misma resolución que el runtime).
+1. **Ingesta desde la URL oficial** — `OFFICIAL_PREOP_DOC_URL` apunta a la página anterior; el índice usa el HTML de esa URL salvo *override* `PREOP_RAG_LIVE_URL` (documentado en [`.env.example`](.env.example)).
+2. **Retriever observable** — Tras arranque OK, log `INFO` de `preop_rag.runtime`: `Pre-op RAG index ready (source=<URL>, chunks=N, fake_embeddings=...)`.
+3. **Comprobación en código** — `get_indexed_preop_source_url()` en `preop_rag/runtime.py` devuelve la URL indexada (o `None`).
+4. **Pruebas automáticas** — `pytest tests/test_preop_config.py`; `tests/test_preop_pipeline.py` (`metadata["source"]`); `tests/test_preop_runtime.py` (sin override, URL oficial). Con red: `RUN_PREOP_RAG_LIVE=1 pytest -m preop_live`.
+5. **Demo CLI** — `python -m preop_rag.demo` imprime en *stderr* `source_url=...`.
 
-- **Config** (chunk size, overlap, `TOP_K_RESULTS`, embedding model, source URL, `PREOP_RAG_CONFIG_VERSION`): `preop_rag/config.py`.
-- **Variables:** `PREOP_RAG_LIVE_URL` (solo override opcional), `PREOP_RAG_FAKE_EMBEDDINGS=1` para índice local sin `OPENAI_API_KEY` (desarrollo / pruebas). Sin clave y sin *fake*, el chat sigue funcionando **sin** RAG.
-- **Errores:** si la URL no responde, las preguntas que parecen de preoperatorio devuelven el texto fijado en código: *«No se pudo acceder a la fuente de información preoperatoria. Por favor, inténtalo de nuevo.»* El resto de temas siguen con el LLM sin fragmentos recuperados.
-- **Demo local (solo pipeline):** `python -m preop_rag.demo` (con clave) o `python -m preop_rag.demo --fake-embeddings`.
-- **Tests:** `pytest tests/test_preop_*.py` (evidencia VET-11 + VE-28). Opcional con red: `RUN_PREOP_RAG_LIVE=1 pytest -m preop_live`.
+**Config / variables / errores / demo:** chunking y `TOP_K_RESULTS` en `preop_rag/config.py`; `PREOP_RAG_FAKE_EMBEDDINGS=1` para desarrollo sin embeddings OpenAI; si la URL falla, mensaje fijado en código: *«No se pudo acceder a la fuente de información preoperatoria. Por favor, inténtalo de nuevo.»*
 
-**Conv. 10 — guion de aceptación (inglés)** — Con el servidor en marcha, RAG activo (`OPENAI_API_KEY` o `PREOP_RAG_FAKE_EMBEDDINGS=1` con *fetch* OK). Comprueba que la respuesta refleja el contenido de la página oficial (p. ej. ayuno y agua); en depuración, verifica que el *system prompt* del modelo incluye `Retrieved pre-operative reference excerpts`.
+**Conv. 10 (inglés)** — RAG activo (`OPENAI_API_KEY` o `PREOP_RAG_FAKE_EMBEDDINGS=1` con fetch OK). Comprobar ayuno/agua y bloque `Retrieved pre-operative reference excerpts` en el *system prompt* si depuras.
 
 | Turno | Qué comprobar |
 | ----- | ------------- |
-| 1 | «How long should my dog fast before the operation?» → ventana de ayuno y tono acorde al doc. |
-| 2 | «Can he drink water right up until we leave home?» → política de agua coherente con el doc o excerpts. |
+| 1 | «How long should my dog fast before the operation?» → ventana de ayuno acorde al doc. |
+| 2 | «Can he drink water right up until we leave home?» → política de agua coherente con el doc. |
 
 ```bash
 curl -s -X POST http://127.0.0.1:8000/chat -H "Content-Type: application/json" \
@@ -140,268 +280,100 @@ curl -s -X POST http://127.0.0.1:8000/chat -H "Content-Type: application/json" \
   -d "{\"msg\": \"Can he drink water right up until we leave home?\", \"session_id\": \"accept-rag-10a\"}"
 ```
 
-**Preguntas de prueba manual (español, mismo pipeline)** — servidor en marcha; la respuesta debe basarse en el contenido recuperado de la URL oficial cuando el RAG está activo:
+**Preguntas manuales (español)** y más `curl`: ver tabla en [docs/conversaciones-aceptacion-chatbot.md](docs/conversaciones-aceptacion-chatbot.md) (mismo pipeline).
 
-| # | Pregunta (resumen) | Qué comprobar en la respuesta |
-| --- | --- | --- |
-| 1 | Ayuno antes de operación | Menciona ayuno en horas coherente con la página (p. ej. ventana 8–12 h o la redacción del doc). |
-| 2 | Noche anterior / preparación | Instrucciones alineadas con el doc (descanso, llegada, documentación, etc.). |
-| 3 | Agua antes de la cirugía | Política de agua acorde al doc (p. ej. hasta 1–2 h antes si así figura). |
+### Tool de disponibilidad (VET-12 / VET-13, VE-29 / VE-30)
 
-```bash
-# 1 — Ayuno
-curl -X POST http://127.0.0.1:8000/chat \
-  -H "Content-Type: application/json" \
-  -d "{\"msg\": \"¿Cuántas horas debe estar mi mascota en ayuno antes de la operación?\", \"session_id\": \"test-rag-1\"}"
+El modelo enlaza **`check_surgical_availability`**: capacidad orientativa por día (`YYYY-MM-DD`). Resultados **orientativos**; no confirman reserva ni calendario real del cliente (ver `prompt.md`). Implementación: [tools/availability.py](tools/availability.py).
 
-# 2 — Preparación previa
-curl -X POST http://127.0.0.1:8000/chat \
-  -H "Content-Type: application/json" \
-  -d "{\"msg\": \"¿Qué debo hacer la noche anterior a la cirugía?\", \"session_id\": \"test-rag-2\"}"
+| Modo | Condición | `source` |
+| ---- | --------- | -------- |
+| Google Calendar (VE-30) | Env OAuth completo y `GOOGLE_CALENDAR_USE_STUB` no truthy | `"google_calendar"` |
+| Mock (VE-29) | Stub, fin de semana, fecha inválida o error | `"mock"` |
 
-# 3 — Agua
-curl -X POST http://127.0.0.1:8000/chat \
-  -H "Content-Type: application/json" \
-  -d "{\"msg\": \"¿Puede beber agua mi perro antes de la operación?\", \"session_id\": \"test-rag-3\"}"
-```
+Mock: cuota 240 min; lun/mié 60 min libres; mar/jue 120; vie 180; fin de semana no disponible; `dogs_remaining` / `cats_remaining` numéricos. Modo Google: mismos campos de minutos restantes aproximados por eventos; `dogs_remaining` / `cats_remaining` en `null`.
 
----
+**Tests:** `pytest tests/test_availability.py -v`
 
-## Variables de entorno
+**OAuth (reproducible):** Google Cloud → Calendar API → OAuth *Desktop app* → `python scripts/get_google_token.py path/to/client_secret….json` → copiar variables a `.env` según [.env.example](.env.example). Evidencia de llamada en vivo: [docs/evidence/](docs/evidence/) (ver [docs/evidence/README.md](docs/evidence/README.md)).
 
-Opcionales: el API arranca sin `.env`. Ver `.env.example` (OpenAI, CORS, RAG, memoria de chat).
+**`list_google_calendar_events` (VE-24):** [google_calendar_tool.py](google_calendar_tool.py); mismo bloque de variables. Uso interno; no sustituye reglas Tetris en `docs/` ni expone horarios quirúrgicos internos al cliente.
 
-### Session memory (VE-21) — English
-
-In-process conversation store keyed by **trimmed** `session_id` (**case-sensitive**; `"A"` and `"a"` are different). `POST /chat`, `POST /ask_bot`, and `POST /askbot` share this store. Data is **not** persisted: a process restart clears everything. There is **no separate token budget** for history: trimming is by **stored turns** only (`CHAT_MEMORY_MAX_TURNS`).
-
-| Variable | Default | Meaning |
-| -------- | ------- | ------- |
-| `CHAT_MEMORY_MAX_TURNS` | `50` | Max stored **user→assistant pairs** per session; oldest pairs dropped. |
-| `CHAT_MEMORY_TTL_SECONDS` | `0` | If `0`, TTL is off (entries last until restart). If positive, a session with no activity for that many seconds (monotonic clock) is treated as empty on the next access. |
-
-Concurrency: a single **`threading.Lock`** protects the store. Concurrent requests for the same session are serialized; under the lock, updates apply in order (**last write wins** for the stored transcript state after each completed handler).
-
-Validation failures (`422` / `415` on `/chat`, `/ask_bot`, or `/askbot`) do **not** append to memory.
-
-### LLM (OpenAI, `prompt.md`)
-
-- **`OPENAI_API_KEY`**: obligatoria para que `POST /chat`, `POST /ask_bot` y `POST /askbot` llamen al modelo. Sin ella, esas rutas responden **503** con un mensaje claro (nunca en código ni en el front; ver `.env.example`).
-- **`OPENAI_CHAT_MODEL`** (opcional): modelo de chat OpenAI; por defecto `gpt-4o-mini` en `llm_service.py`.
-- **System prompt:** el texto operativo se carga desde **`prompt.md`** (raíz del repo, junto a `main.py`). En código, el puntero breve al prompt avanzado del caso ENAE y a ese archivo está en **`SYSTEM_PROMPT_SOURCE_REF`** en [llm_service.py](llm_service.py) (no se pega el prompt largo en Python).
-
-Otras variables (CORS, puerto, RAG, etc.) siguen en `.env.example`.
-
-### Orientative surgical availability (`check_surgical_availability`, VE-29 + VE-30)
-
-The chat model binds **`check_surgical_availability`**: orientative theatre capacity for a calendar day (`YYYY-MM-DD`). The agent must treat results as **orientative** only and **must not** confirm a booking or claim a “real” client calendar (see `prompt.md`).
-
-**Python module:** [tools/availability.py](tools/availability.py) — `check_availability(date: str) -> dict` plus the LangChain `StructuredTool`.
-
-**Data sources:**
-
-| Mode | When | `source` field |
-| --- | --- | --- |
-| **Google Calendar** (VE-30) | `GOOGLE_CALENDAR_USE_STUB` is not set to a truthy value **and** `GOOGLE_CALENDAR_ID` plus OAuth env vars are complete | `"google_calendar"` |
-| **Mock** (VE-29) | `GOOGLE_CALENDAR_USE_STUB=1` (CI / no creds), incomplete Google env, or weekend rule below | `"mock"` |
-
-**Google path (VE-30):** For each **weekday** (Europe/Madrid calendar day), the tool calls [google_calendar_tool.py](google_calendar_tool.py) → **Google Calendar API** (`calendar.googleapis.com`, `events.list`). Timed events contribute their duration (clipped to that day) to consumed minutes; **all-day** events block the full **240** minutes. Remaining minutes = `240 − consumed` (floored at 0). `dogs_remaining` / `cats_remaining` are **`null`** in this mode (not inferred from Calendar).
-
-**Weekends:** No surgical activity is returned (`available: false`, `source: "mock"`) without calling Google.
-
-**What the mock simulates (fixed fiction, VE-29):**
-
-| Rule | Mock value |
-| --- | --- |
-| Daily theatre quota | 240 minutes total |
-| Monday & Wednesday | Higher load — **60** minutes remaining |
-| Tuesday & Thursday | Medium — **120** minutes remaining |
-| Friday | Lighter — **180** minutes remaining |
-| Weekend | No surgical activity (`available: false`) |
-| Dog slots per day | Max **3** (`dogs_remaining` is free capacity) |
-| Cat slots per day | Max **4** (`cats_remaining` is free capacity) |
-
-**JSON schema (documented for tooling and logs):**
-
-- **Weekday with capacity** (`available: true`): `date`, `weekday` (English), `available`, `slots_remaining_minutes`, `dogs_remaining`, `cats_remaining` (integers in mock; `null` in Google mode), `intake_windows` (`cats`, `dogs`, Unicode en-dash as in the ticket), `source`, `note`.
-- **Weekend, invalid date, or Google error** (`available: false`): `date`, `weekday` when the date parses, `available`, `reason`, `source`. Invalid ISO dates omit `weekday` and use a clear `reason` (no Python exception from the tool).
-
-**Example `curl` (agent may call the tool when answering):**
-
-```bash
-curl -X POST http://127.0.0.1:8000/chat \
-  -H "Content-Type: application/json" \
-  -d "{\"msg\": \"¿Hay disponibilidad para operar a mi gato el próximo martes?\", \"session_id\": \"test-tool-1\"}"
-```
-
-**Expected server log (operator):** lines like `[tool] check_surgical_availability called with date="..."` and `[tool] Response: {...}` from [tools/availability.py](tools/availability.py). With a live Google configuration you should also see a line containing **`calendar.googleapis.com`** from [google_calendar_tool.py](google_calendar_tool.py) before the API response.
-
-**Unit tests (no server):** `pytest tests/test_availability.py -v`
-
-#### Google OAuth setup (reproducible, no secrets in git)
-
-1. In [Google Cloud Console](https://console.cloud.google.com), create a project (e.g. `vet-es-chatbot`), enable **Google Calendar API**, and create an OAuth client of type **Desktop app**.
-2. Download the client JSON (do **not** commit it; keep it outside the repo or add a local ignore pattern).
-3. Run the one-time token helper (install deps from `requirements.txt` first):
-
-```bash
-python scripts/get_google_token.py path/to/client_secret.apps.googleusercontent.com.json
-```
-
-4. Copy the printed `GOOGLE_CALENDAR_REFRESH_TOKEN=...` into your local `.env` together with `GOOGLE_CALENDAR_CLIENT_ID`, `GOOGLE_CALENDAR_CLIENT_SECRET`, and `GOOGLE_CALENDAR_ID` (e.g. `primary`). See [.env.example](.env.example) for placeholders **without real values**.
-
-**Coursework evidence:** after a successful live call, save a log snippet or screenshot under [docs/evidence/](docs/evidence/) or attach it to the PR (see [docs/evidence/README.md](docs/evidence/README.md)).
-
-### Google Calendar tool (VE-24)
-
-The codebase also exposes **`list_google_calendar_events`** (read-only) in [google_calendar_tool.py](google_calendar_tool.py) for RFC 3339 time windows. It uses the **same** environment variables as the table below. This is **staff-side** infrastructure: it does not replace Tetris / capacity rules in `docs/` and must not be used to expose **internal surgical times** to clients (see `docs/event-storming-workflow.md` and `docs/reglas-de-negocio-logica-de-agenda.md`).
-
-| Variable | Meaning |
-| -------- | ------- |
-| `GOOGLE_CALENDAR_ID` | Calendar to query (e.g. `primary` or a calendar ID). |
-| `GOOGLE_CALENDAR_CLIENT_ID` | OAuth client ID (Desktop app in Google Cloud Console). |
-| `GOOGLE_CALENDAR_CLIENT_SECRET` | OAuth client secret. |
-| `GOOGLE_CALENDAR_REFRESH_TOKEN` | OAuth refresh token (from `scripts/get_google_token.py`). |
-| `GOOGLE_CALENDAR_HTTP_TIMEOUT_SECONDS` | Optional timeout for API HTTP calls (default `30`). |
-| `GOOGLE_CALENDAR_USE_STUB` | If `1` / `true`, skips live Google (stub empty list for `list_google_calendar_events`; **mock** table for `check_surgical_availability`). **Default:** live API when unset and env is complete. |
-
-**OAuth scope (minimal):** `https://www.googleapis.com/auth/calendar.readonly` — listed here and in code so reviewers can confirm least privilege.
-
-**Manual check:** Configure env (no secrets in git), run the API, send a chat message that should trigger availability for a weekday, or call `list_google_calendar_events_impl` / `check_availability` from a short Python snippet.
-
-### Limitaciones (Google Calendar vs reglas de negocio del caso)
-
-Google Calendar is a **generic** calendar. It is **not** the full ENAE “Tetris” scheduler:
+**Límite (Calendar frente a reglas del caso):**
 
 | Regla de negocio | ¿Cubierta por Google Calendar? | Cómo se gestiona aquí |
-| --- | --- | --- |
-| Cuota 240 min / día | No nativa | Se **aproxima** sumando duraciones de eventos del día (herramienta de disponibilidad). |
-| Límite de perros por día | No | No implementado en la integración actual; el modo Google devuelve `dogs_remaining: null`. |
-| Ventanas de ingreso (gatos / perros) | No | Solo se devuelven como texto fijo en `intake_windows`; no se validan contra eventos. |
-| Horarios quirúrgicos internos | No expuestos | La herramienta es orientativa para el agente; no sustituye confirmación humana. |
-| Otras reglas (celo, etc.) | No | Fuera del alcance de esta integración. |
+| ---------------- | ------------------------------ | --------------------- |
+| Cuota 240 min / día | No nativa | Se aproxima sumando duraciones de eventos del día en la herramienta. |
+| Límite de perros por día | No | En modo Google, `dogs_remaining` es `null` (no inferido del calendario). |
+| Ventanas de ingreso (gatos / perros) | No | Se devuelven como texto fijo en `intake_windows`; no se validan contra eventos. |
+| Horarios quirúrgicos internos | No expuestos | La herramienta es orientativa; no sustituye confirmación humana. |
+| Otras reglas (celo, etc.) | No | Ver [docs/reglas-de-negocio-logica-de-agenda.md](docs/reglas-de-negocio-logica-de-agenda.md) y [docs/event-storming-workflow.md](docs/event-storming-workflow.md). |
 
-**Conclusión:** use Calendar as a **signal** for same-day occupancy, not as the sole source of truth for clinic booking rules.
+### Catálogo de intents
 
+Los intents alineados con las 10 conversaciones de aceptación están descritos por conversación en [docs/conversaciones-aceptacion-chatbot.md](docs/conversaciones-aceptacion-chatbot.md) (VET-5 / evidencia de +1 pt intents).
+
+### Rúbrica del caso → implementación
+
+| Punto del caso | Cubierto por | Evidencia |
+| -------------- | ------------ | --------- |
+| Base: memoria + dominio + prompt | `conversation_memory`, `prompt.md`, rutas chat | Conv. 1–7 en `docs/conversaciones-aceptacion-chatbot.md`; tests memoria/LLM según `tests/` |
+| + Vercel | Despliegue | Panel [2310-dots-projects/vet-es](https://vercel.com/2310-dots-projects/vet-es); `vercel.json`, `api/` |
+| + Jira | Gestión backlog | [Proyecto VE](https://eliuperez4.atlassian.net/jira/software/projects/VE/issues) |
+| + RAG (URL oficial) | `preop_rag/` + `llm_service` | `OFFICIAL_PREOP_DOC_URL`, tests preop, conv. 10 |
+| + Tool disponibilidad | `tools/availability.py`, Calendar opcional | Conv. 8–9; `tests/test_availability.py` |
+| + Intents documentados | Documentación | `docs/conversaciones-aceptacion-chatbot.md` |
 
 ---
 
-## Backlog / roadmap
+## Documentación adicional
 
-Seguimiento del trabajo en Jira:
+| Recurso | Descripción |
+| ------- | ----------- |
+| [CLAUDE.md](CLAUDE.md) | Guía para asistentes de código en el repo |
+| [docs/event-storming-workflow.md](docs/event-storming-workflow.md) | Flujo de reserva y capacidad (Mermaid) |
+| [docs/reglas-de-negocio-logica-de-agenda.md](docs/reglas-de-negocio-logica-de-agenda.md) | Reglas de agenda |
+| [docs/consideraciones-preoperatorias-clinica.md](docs/consideraciones-preoperatorias-clinica.md) | Consideraciones preoperatorias (ES) |
+| [docs/conversaciones-aceptacion-chatbot.md](docs/conversaciones-aceptacion-chatbot.md) | Guiones de aceptación e intents |
+| [docs/jira/](docs/jira/) | Exports de tickets enriquecidos |
+| [docs/SDD_PROJECT_RULES.md](docs/SDD_PROJECT_RULES.md) | Reglas SDD del proyecto |
+| [.cursor/commands/implement.md](.cursor/commands/implement.md) | Flujo ticket Jira → PR |
+| [.cursor/commands/enrich.md](.cursor/commands/enrich.md) | Flujo de enriquecimiento de tickets |
+
+**Consistencia:** al cambiar reglas en `docs/`, actualizar este README si afecta a comportamiento descrito (capacidad, ventanas, mensajes).
+
+---
+
+## Cómo probar y verificar
+
+1. **Automatizado:** `pytest` (con venv y `requirements-dev.txt` si aplica).
+2. **Conversaciones de aceptación:** seguir [docs/conversaciones-aceptacion-chatbot.md](docs/conversaciones-aceptacion-chatbot.md) (orden conv. 1–7 base; 8–9 tool; 10 RAG).
+3. **RAG:** con servidor en marcha y RAG activo (`OPENAI_API_KEY` o `PREOP_RAG_FAKE_EMBEDDINGS=1` con fetch OK), usar los ejemplos `curl` de la conv. 10 en ese documento o preguntas en español del mismo guion.
+4. **Disponibilidad:** mensaje de chat que dispare la tool o logs `[tool] check_surgical_availability` en [tools/availability.py](tools/availability.py); con Google en vivo, trazas hacia `calendar.googleapis.com` en [google_calendar_tool.py](google_calendar_tool.py).
+
+---
+
+## Backlog y trazabilidad Jira
 
 - [Issues del proyecto VE](https://eliuperez4.atlassian.net/jira/software/projects/VE/issues)
+- [Resumen del proyecto](https://eliuperez4.atlassian.net/jira/software/projects/VE/summary)
 
-Roadmap de producto a alto nivel: **TBD** (p.ej. enlace a Confluence o épica cuando exista).
+**Mapeo rápido (tickets Doc / curso → secciones de este README):**
 
----
+| Ticket / tema | Sección / evidencia en repo |
+| ------------- | --------------------------- |
+| VET-3 | [Despliegue en Vercel](#despliegue-en-vercel) |
+| VET-4 | Esta sección + enlaces Jira |
+| VET-5 | [Catálogo de intents](#catálogo-de-intents) |
+| VET-11 | [RAG preoperatorio](#rag-preoperatorio-vet-11-ve-22-ve-28) |
+| VET-12 / VET-13 | [Tool de disponibilidad](#tool-de-disponibilidad-vet-12--vet-13-ve-29--ve-30) |
+| VET-14 + base | [Funcionalidades y rúbrica](#funcionalidades-y-rúbrica-del-caso), `docs/conversaciones-aceptacion-chatbot.md` |
 
-## Enlaces relevantes.
-
-
-| Recurso                                                                      | Descripción                                |
-| ---------------------------------------------------------------------------- | ------------------------------------------ |
-| [Repositorio GitHub](https://github.com/2310-dot/vet-es)                     | Código fuente                              |
-| [CLAUDE.md](CLAUDE.md)                                                       | Guía para asistentes de código en el repo  |
-| [docs/event-storming-workflow.md](docs/event-storming-workflow.md)           | Flujo de reserva y reglas de capacidad     |
-| [docs/pre-operative-considerations.md](docs/pre-operative-considerations.md) | Consideraciones preoperatorias (ES)        |
-| [docs/jira/](docs/jira/)                                                     | Exports de tickets enriquecidos (ejemplos) |
-| [.cursor/commands/implement.md](.cursor/commands/implement.md)               | Flujo ticket Jira → PR                     |
-| [.cursor/commands/enrich.md](.cursor/commands/enrich.md)                     | Flujo de enriquecimiento de tickets        |
-
+Planificación de producto a alto nivel no gestionada aquí: **TBD por completar por el equipo** (p. ej. épica o Confluence cuando exista).
 
 ---
 
-## Workflow (negocio)
+## Notas de seguridad
 
-Flujo principal de conversación a cita confirmada:
-
-1. **Conversación → intención y slots** — El usuario habla con el bot; el bot identifica intención y datos necesarios.
-2. **Solo día** — El usuario elige un **día**; no se pide hora quirúrgica al cliente (las gestiona el sistema por dentro).
-3. **Reglas de capacidad** — Cuota **240 minutos** diarios, **límite de perros** por día, tiempos de servicio desde configuración o tabla maestra.
-4. **Ventanas de ingreso** — Gatos 08:00–09:00; perros 09:00–10:30. Los horarios quirúrgicos no se muestran al cliente.
-5. **Confirmación** — Instrucciones de ingreso + ayuno (última comida 8–12 h antes; agua hasta 1–2 h antes, según política de la clínica).
-
----
-
-## Docs overview
-
-La carpeta `docs/` es la fuente de verdad para reglas de negocio y mensajería.
-
-
-| Documento                              | Uso                                                 |
-| -------------------------------------- | --------------------------------------------------- |
-| `docs/pre-operative-considerations.md` | Alcance de clínica, ayuno, transporte, alta (ES).   |
-| Reglas de negocio / agenda             | En `docs/` cuando existan (p. ej. cuotas, límites). |
-| `docs/jira/`                           | Tickets enriquecidos y ejemplos before/after.       |
-
-
-Si añades documentos nuevos, enlázalos en **Enlaces relevantes** o en esta tabla.
-
----
-
-## Consistencia
-
-- **Capacidad y cuota:** lo descrito en **Workflow** debe alinearse con `docs/` y reglas en `.cursor/rules` si las hay.
-- **Ventanas de ingreso y comunicación:** coherentes con `docs/pre-operative-considerations.md`.
-- Al cambiar reglas en `docs/`, actualiza este README para evitar contradicciones.
-
----
-
-## API (chat con LLM)
-
-La lógica del asistente está en [llm_service.py](llm_service.py) (`invoke_chat_llm`, `clinic_chat`); [main.py](main.py) solo valida, llama al LLM y registra memoria por `session_id`.
-
-- **GET /** — HTML del demo de chat (`static/chat.html`).
-- **POST /chat** — JSON `{"msg": "...", "session_id": "..."}` (usa la UI en `/` o `curl` como abajo).
-- **POST /ask_bot** — `application/x-www-form-urlencoded` (`msg`, `session_id`).
-- **POST /askbot** — JSON o form (VE-25); mismos campos.
-
-Con **`OPENAI_API_KEY`** configurada y `prompt.md` presente, la respuesta es texto del modelo (`placeholder: false` en JSON). Sin clave: **503**. Fallo del proveedor: **502**.
-
-### Ejemplos (local)
-
-Sustituye el puerto si no usas `8000`. Requiere venv, dependencias y `.env` con clave real.
-
-```bash
-curl -s http://127.0.0.1:8000/health
-
-curl -s -X POST http://127.0.0.1:8000/chat \
-  -H "Content-Type: application/json" \
-  -d "{\"msg\": \"¿En qué horario abren?\", \"session_id\": \"demo-curl\"}"
-
-curl -s -X POST http://127.0.0.1:8000/ask_bot \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "msg=Hola&session_id=demo-form"
-```
-
-**Desde la UI:** con el servidor en marcha, abre [http://127.0.0.1:8000/](http://127.0.0.1:8000/) y envía un mensaje (llama a `POST /chat`).
-
-Ejemplo de cuerpo de respuesta (campos principales):
-
-```json
-{
-  "msg": "…texto del asistente…",
-  "session_id": "demo-curl",
-  "placeholder": false,
-  "turn_count": 1
-}
-```
-
-`turn_count` es el número de pares usuario→asistente guardados para ese `session_id` tras la petición.
-
----
-
-## Cursor workflows
-
-- **Implementar ticket Jira:** p. ej. *"Implement VE-12"* — lee el ticket, planifica según AC, desarrolla, mueve estados y abre PR. Detalle: [.cursor/commands/implement.md](.cursor/commands/implement.md).
-- **Enriquecer ticket:** *"Enrich VE-1"* o `/enrich` — refina criterios y alcance con el agente PM; publicar en Jira requiere tu aprobación. Detalle: [.cursor/commands/enrich.md](.cursor/commands/enrich.md).
-
-## Despliegue
-
-**Panel del proyecto (Vercel):** [2310-dots-projects/vet-es](https://vercel.com/2310-dots-projects/vet-es)
-
-El proyecto se despliega en **Vercel** al hacer push o merge a `main`. Cada PR genera un **deployment preview** con su propia URL.
-
-- **Abrir la UI de chat en producción o preview:** usa la URL pública del deployment (dominio `*.vercel.app` o dominio custom), ruta `/`. Es la misma app FastAPI que en local; el chat sigue en la raíz.
-- **Variables de entorno:** solo en Vercel (`Settings → Environment Variables`). No se commitea `.env`. Para local, copia `.env.example` a `.env` y rellena valores (p. ej. `OPENAI_API_KEY`, `CORS_ALLOW_ORIGINS` si aplica).
+- Claves API, secretos OAuth y tokens solo en **`.env` local** o **variables del panel Vercel**; nunca en el repositorio ni en el frontend.
+- El cliente de demo solo envía `msg` y `session_id`; no almacena la clave OpenAI.
