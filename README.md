@@ -160,6 +160,41 @@ Validation failures (`422` / `415` on `/chat`, `/ask_bot`, or `/askbot`) do **no
 
 Otras variables (CORS, puerto, RAG, etc.) siguen en `.env.example`.
 
+### Orientative surgical availability (`check_surgical_availability`, VE-29)
+
+The chat model binds **`check_surgical_availability`**: a **mock** read-model for theatre capacity by date (`YYYY-MM-DD`). It is **not** a real calendar; responses always include `"source": "mock"`. The agent must treat results as **orientative** only (see `prompt.md`).
+
+**Python module:** [tools/availability.py](tools/availability.py) — pure function `check_availability(date: str) -> dict` plus the LangChain `StructuredTool`.
+
+**What the mock simulates (fixed fiction, VE-29):**
+
+| Rule | Mock value |
+| --- | --- |
+| Daily theatre quota | 240 minutes total |
+| Monday & Wednesday | Higher load — **60** minutes remaining |
+| Tuesday & Thursday | Medium — **120** minutes remaining |
+| Friday | Lighter — **180** minutes remaining |
+| Weekend | No surgical activity (`available: false`) |
+| Dog slots per day | Max **3** (`dogs_remaining` is free capacity) |
+| Cat slots per day | Max **4** (`cats_remaining` is free capacity) |
+
+**JSON schema (documented for tooling and logs):**
+
+- **Weekday with capacity** (`available: true`): `date`, `weekday` (English), `available`, `slots_remaining_minutes`, `dogs_remaining`, `cats_remaining`, `intake_windows` (`cats`, `dogs`, Unicode en-dash as in the ticket), `source`, `note`.
+- **Weekend or invalid date** (`available: false`): `date`, `weekday` when the date parses, `available`, `reason`, `source`. Invalid ISO dates omit `weekday` and use a clear `reason` (no Python exception from the tool).
+
+**Example `curl` (agent may call the tool when answering):**
+
+```bash
+curl -X POST http://127.0.0.1:8000/chat \
+  -H "Content-Type: application/json" \
+  -d "{\"msg\": \"¿Hay disponibilidad para operar a mi gato el próximo martes?\", \"session_id\": \"test-tool-1\"}"
+```
+
+**Expected server log (operator):** lines like `[tool] check_surgical_availability called with date="..."` and a compact `[tool] Response: {...}` from [tools/availability.py](tools/availability.py).
+
+**Unit tests (no server):** `pytest tests/test_availability.py -v`
+
 ### Google Calendar tool (VE-24)
 
 The chat model can call **`list_google_calendar_events`** (read-only) against **Google Calendar API** when credentials are set. This is **staff-side** infrastructure: it does not replace Tetris / capacity rules in `docs/` and must not be used to expose **internal surgical times** to clients (see `docs/event-storming-workflow.md` and `docs/reglas-de-negocio-logica-de-agenda.md`).
