@@ -24,7 +24,7 @@ def test_tool_invoke_weekday_stable_fields() -> None:
     assert out["available"] is True
     assert out["slots_remaining_minutes"] == 120
     assert out["dogs_remaining"] == 2
-    assert out["cats_remaining"] == 3
+    assert out["cats_remaining"] == 2
     assert out["intake_windows"]["cats"] == "08:00–09:00"
     assert out["intake_windows"]["dogs"] == "09:00–10:30"
     assert out["source"] == "mock"
@@ -63,11 +63,12 @@ def test_monday_wednesday_sixty_minutes() -> None:
     assert check_availability("2026-04-15")["slots_remaining_minutes"] == 60
 
 
-def test_friday_one_eighty() -> None:
+def test_friday_no_surgery_unavailable() -> None:
     out = check_availability("2026-04-17")
     assert out["weekday"] == "Friday"
-    assert out["slots_remaining_minutes"] == 180
-    assert out["dogs_remaining"] == 3
+    assert out["available"] is False
+    assert "viernes" in (out.get("reason") or "").lower()
+    assert out["source"] == "mock"
 
 
 def test_surgical_availability_tools_list() -> None:
