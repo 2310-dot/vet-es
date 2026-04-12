@@ -16,10 +16,22 @@ from langchain_core.vectorstores import InMemoryVectorStore
 from llm_service import (
     LlmConfigurationError,
     LlmUpstreamError,
+    compose_base_system_prompt,
     invoke_chat_llm,
     load_system_prompt,
 )
 from preop_rag.runtime import PREOP_SOURCE_UNAVAILABLE_USER_MESSAGE
+
+
+def test_compose_base_system_prompt_includes_configured_contact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CLINIC_PHONE", "+34 555 0101")
+    monkeypatch.setenv("CLINIC_EMAIL", "billing@example.invalid")
+    text = compose_base_system_prompt()
+    assert "+34 555 0101" in text
+    assert "billing@example.invalid" in text
+    assert "Published clinic phone" in text
 
 
 def test_load_system_prompt_rejects_empty_file(tmp_path: Path) -> None:
@@ -108,8 +120,9 @@ def test_invoke_chat_llm_uses_system_prompt_from_file() -> None:
     import llm_service
     from llm_service import invoke_chat_llm
 
-    system_text = llm_service.load_system_prompt()
+    system_text = llm_service.compose_base_system_prompt()
     assert "must not diagnose" in system_text.lower()
+    assert "clinic contact channels" in system_text.lower()
 
     captured: list = []
 
