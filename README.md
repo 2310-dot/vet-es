@@ -16,11 +16,7 @@ Chatbot y asistente de reservas para clínica veterinaria (caso ENAE). El backen
 | **Python**           | Servicios, APIs, cadenas/agentes LangChain.                                   |
 | **LangChain**        | Prompts, herramientas (citas, paciente, etc.), RAG sobre protocolos, memoria. |
 | **FastAPI**          | Capa HTTP/API del bot.                                                        |
-<<<<<<< Updated upstream
 | **Canal / frontend** | Demo web estática (`static/chat.html` + JS) servida por FastAPI en `GET /`.   |
-=======
-| **Canal / frontend** | Demo web (`static/chat.html`) en `GET /`; WhatsApp u otros canales **TBD**.   |
->>>>>>> Stashed changes
 
 
 Detalle de implementación: [.cursor/skills/langchain-vet-chatbots/SKILL.md](.cursor/skills/langchain-vet-chatbots/SKILL.md), [.cursor/agents/backend-langchain-vet.md](.cursor/agents/backend-langchain-vet.md).
@@ -79,6 +75,15 @@ python -m uvicorn main:app --reload
 - **URL base del API (solo front):** edita `static/chat_config.js` y asigna `window.CHATBOT_API_BASE`. Cadena vacía `""` = mismo origen que la página (caso típico local). Para otro backend, p. ej. `"https://tu-app.vercel.app"` (sin barra final). No hay lógica de negocio en el cliente más allá de enviar el mensaje y mostrar la respuesta.
 - **Despliegue (Vercel):** abre la **URL pública** del proyecto (raíz `/`), la misma que muestra el dashboard de Vercel como dominio de producción o preview — no el enlace al panel de Vercel. Ahí se sirve el mismo HTML; si sirves la UI desde otro origen que el de la API, configura `CORS_ALLOW_ORIGINS` en Vercel (lista separada por comas; ver `.env.example`).
 
+**Propagación de `session_id` (memoria por sesión, VE-27):**
+
+- **Mecanismo documentado en este repo:** el identificador viaja en el **cuerpo de la petición** (no cabecera `X-Session-ID`, ni cookie, ni query en el servidor).
+  - `POST /chat`: JSON `{"msg": "...", "session_id": "..."}` (`Content-Type: application/json`).
+  - `POST /ask_bot`: `application/x-www-form-urlencoded` con campos `msg` y `session_id`.
+  - `POST /askbot`: el mismo par en JSON o en formulario urlencoded (VE-25).
+- **Demo en navegador:** [static/chat.js](static/chat.js) obtiene o crea un UUID y lo guarda en `sessionStorage` bajo la clave `vet-es-chat-session-id` (una conversación por pestaña; datos de ejemplo, no persistidos en servidor salvo el buffer en memoria del proceso).
+- **Límite de contexto:** el backend **no** aplica un tope fijo de tokens al historial; recorta por **turnos** completos (pares usuario→asistente) con `CHAT_MEMORY_MAX_TURNS` (por defecto `50`). Ver tabla en [Variables de entorno → Session memory](#session-memory-ve-21--english).
+
 **Tests (opcional):** con el venv activo, `python -m pip install -r requirements-dev.txt` si aplica, luego `pytest`.
 
 ### Pre-op RAG (VE-22)
@@ -95,7 +100,7 @@ Opcionales: el API arranca sin `.env`. Ver `.env.example` (OpenAI, CORS, RAG, me
 
 ### Session memory (VE-21) — English
 
-In-process conversation store keyed by **trimmed** `session_id` (**case-sensitive**; `"A"` and `"a"` are different). `POST /chat` and `POST /ask_bot` share this store. Data is **not** persisted: a process restart clears everything.
+In-process conversation store keyed by **trimmed** `session_id` (**case-sensitive**; `"A"` and `"a"` are different). `POST /chat`, `POST /ask_bot`, and `POST /askbot` share this store. Data is **not** persisted: a process restart clears everything. There is **no separate token budget** for history: trimming is by **stored turns** only (`CHAT_MEMORY_MAX_TURNS`).
 
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
@@ -104,7 +109,10 @@ In-process conversation store keyed by **trimmed** `session_id` (**case-sensitiv
 
 Concurrency: a single **`threading.Lock`** protects the store. Concurrent requests for the same session are serialized; under the lock, updates apply in order (**last write wins** for the stored transcript state after each completed handler).
 
-Validation failures (`422` / `415` on `/chat` or `/ask_bot`) do **not** append to memory.
+Validation failures (`422` / `415` on `/chat`, `/ask_bot`, or `/askbot`) do **not** append to memory.
+
+### LLM (OpenAI, `prompt.md`)
+
 - **`OPENAI_API_KEY`**: obligatoria para que `POST /chat`, `POST /ask_bot` y `POST /askbot` llamen al modelo. Sin ella, esas rutas responden **503** con un mensaje claro (nunca en código ni en el front; ver `.env.example`).
 - **`OPENAI_CHAT_MODEL`** (opcional): modelo de chat OpenAI; por defecto `gpt-4o-mini` en `llm_service.py`.
 - **System prompt:** el texto operativo se carga desde **`prompt.md`** (raíz del repo, junto a `main.py`). En código, el puntero breve al prompt avanzado del caso ENAE y a ese archivo está en **`SYSTEM_PROMPT_SOURCE_REF`** en [llm_service.py](llm_service.py) (no se pega el prompt largo en Python).
@@ -196,15 +204,10 @@ Si añades documentos nuevos, enlázalos en **Enlaces relevantes** o en esta tab
 
 La lógica del asistente está en [llm_service.py](llm_service.py) (`invoke_chat_llm`, `clinic_chat`); [main.py](main.py) solo valida, llama al LLM y registra memoria por `session_id`.
 
-<<<<<<< Updated upstream
 - **GET /** — HTML del demo de chat (`static/chat.html`).
-- **POST /ask_bot** — Cuerpo `application/x-www-form-urlencoded` (`msg`, `session_id`); respuesta JSON de prueba hasta integrar LangChain.
-=======
-- **GET /** — HTML del demo de chat.
 - **POST /chat** — JSON `{"msg": "...", "session_id": "..."}` (usa la UI en `/` o `curl` como abajo).
 - **POST /ask_bot** — `application/x-www-form-urlencoded` (`msg`, `session_id`).
 - **POST /askbot** — JSON o form (VE-25); mismos campos.
->>>>>>> Stashed changes
 
 Con **`OPENAI_API_KEY`** configurada y `prompt.md` presente, la respuesta es texto del modelo (`placeholder: false` en JSON). Sin clave: **503**. Fallo del proveedor: **502**.
 
@@ -250,14 +253,7 @@ Ejemplo de cuerpo de respuesta (campos principales):
 
 **Panel del proyecto (Vercel):** [2310-dots-projects/vet-es](https://vercel.com/2310-dots-projects/vet-es)
 
-<<<<<<< Updated upstream
 El proyecto se despliega en **Vercel** al hacer push o merge a `main`. Cada PR genera un **deployment preview** con su propia URL.
 
 - **Abrir la UI de chat en producción o preview:** usa la URL pública del deployment (dominio `*.vercel.app` o dominio custom), ruta `/`. Es la misma app FastAPI que en local; el chat sigue en la raíz.
 - **Variables de entorno:** solo en Vercel (`Settings → Environment Variables`). No se commitea `.env`. Para local, copia `.env.example` a `.env` y rellena valores (p. ej. `OPENAI_API_KEY`, `CORS_ALLOW_ORIGINS` si aplica).
-=======
-Despliegue automático en **Vercel** al hacer push o merge a `main`; cada PR genera un preview con su URL.
-
-- **Chat en producción o preview:** URL pública del deployment, ruta `/` (misma app que en local).
-- **Variables:** en Vercel (`Settings → Environment Variables`), p. ej. `OPENAI_API_KEY`. En local, copia `.env.example` a `.env` y rellena (no subas `.env` al repo).
->>>>>>> Stashed changes

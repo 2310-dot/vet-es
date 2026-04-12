@@ -11,7 +11,7 @@ Environment:
 * ``CHAT_MEMORY_TTL_SECONDS`` — if ``0`` (default), TTL is disabled and entries
   live until process exit. If positive, a session whose last touch is older
   than this many seconds (see :func:`time.monotonic`) is treated as empty on
-  the next access.
+  the next access; :func:`session_messages_copy` removes expired keys on read.
 
 Restarting the process clears all data. There is no persistence.
 """
@@ -90,8 +90,9 @@ def record_exchange(session_id: str, user: str, assistant: str) -> int:
 def session_messages_copy(session_id: str) -> list[Message]:
     """Return a copy of stored messages for *session_id*, or an empty list.
 
-    Applies the same TTL rule as :func:`record_exchange` for reads (expired
-    sessions appear empty). Does not update last-touch time.
+    Applies the same TTL rule as :func:`record_exchange` for reads. If TTL is
+    enabled and the session is expired, the key is removed so stale entries do
+    not accumulate. Does not update last-touch time for non-expired sessions.
 
     :param session_id: Trimmed session identifier.
     :return: Shallow copy of ``(role, text)`` tuples in order.
@@ -103,6 +104,7 @@ def session_messages_copy(session_id: str) -> list[Message]:
             return []
         messages, last_touch = _sessions[session_id]
         if ttl > 0.0 and (now - last_touch) > ttl:
+            del _sessions[session_id]
             return []
         return list(messages)
 
