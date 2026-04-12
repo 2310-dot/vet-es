@@ -86,11 +86,52 @@ python -m uvicorn main:app --reload
 
 **Tests (opcional):** con el venv activo, `python -m pip install -r requirements-dev.txt` si aplica, luego `pytest`.
 
-### Pre-op RAG (VE-22)
+### Pre-op RAG (VE-22, integración VE-28)
 
-- **Config** (chunk size, overlap, embedding model, source URL, `PREOP_RAG_CONFIG_VERSION`): `preop_rag/config.py`.
-- **Demo local:** `python -m preop_rag.demo` (requiere `OPENAI_API_KEY`; usa `python -m preop_rag.demo --fake-embeddings` solo para comprobar el cableado sin API).
-- **Tests:** `pytest` (e2e con HTML de fixture y vector store en memoria). Prueba opcional con red y OpenAI: `RUN_PREOP_RAG_LIVE=1 pytest -m preop_live`.
+La fuente obligatoria es la página oficial en inglés (valor fijado en `preop_rag/config.py` como `OFFICIAL_PREOP_DOC_URL`); no se sustituye por un PDF genérico. Al arrancar FastAPI (`main.py`), se descarga esa URL, se extrae texto útil, se trocea, se generan embeddings y se construye un **vector store en memoria**; en cada `POST /chat`, `POST /ask_bot` y `POST /askbot` se recuperan los fragmentos más similares a la pregunta y se añaden al *system prompt* bajo el bloque `--- Retrieved pre-operative reference excerpts ---`.
+
+```mermaid
+flowchart TD
+  A[Official URL] --> B[Fetch HTTP]
+  B --> C[Parse HTML / BeautifulSoup]
+  C --> D[Chunk + overlap]
+  D --> E[Embeddings]
+  E --> F[InMemoryVectorStore]
+  F --> G[Similarity search per request]
+  G --> H[Inject excerpts into prompt]
+  H --> I[ChatOpenAI]
+```
+
+- **Config** (chunk size, overlap, `TOP_K_RESULTS`, embedding model, source URL, `PREOP_RAG_CONFIG_VERSION`): `preop_rag/config.py`.
+- **Variables:** `PREOP_RAG_LIVE_URL` (solo override opcional), `PREOP_RAG_FAKE_EMBEDDINGS=1` para índice local sin `OPENAI_API_KEY` (desarrollo / pruebas). Sin clave y sin *fake*, el chat sigue funcionando **sin** RAG.
+- **Errores:** si la URL no responde, las preguntas que parecen de preoperatorio devuelven el texto fijado en código: *«No se pudo acceder a la fuente de información preoperatoria. Por favor, inténtalo de nuevo.»* El resto de temas siguen con el LLM sin fragmentos recuperados.
+- **Demo local (solo pipeline):** `python -m preop_rag.demo` (con clave) o `python -m preop_rag.demo --fake-embeddings`.
+- **Tests:** `pytest` — *fixtures* HTML + vector store en memoria (`tests/test_preop_*.py`). Opcional con red: `RUN_PREOP_RAG_LIVE=1 pytest -m preop_live`. La salida de `pytest` en CI o local sirve como **evidencia** de verificación (VE-28).
+
+**Preguntas de prueba manual** (servidor en marcha, `OPENAI_API_KEY` y red; la respuesta debe basarse en el contenido recuperado de la URL oficial, no inventada):
+
+| # | Pregunta (resumen) | Qué comprobar en la respuesta |
+| --- | --- | --- |
+| 1 | Ayuno antes de operación | Menciona ayuno en horas coherente con la página (p. ej. ventana 8–12 h o la redacción del doc). |
+| 2 | Noche anterior / preparación | Instrucciones alineadas con el doc (descanso, llegada, documentación, etc.). |
+| 3 | Agua antes de la cirugía | Política de agua acorde al doc (p. ej. hasta 1–2 h antes si así figura). |
+
+```bash
+# 1 — Ayuno
+curl -X POST http://127.0.0.1:8000/chat \
+  -H "Content-Type: application/json" \
+  -d "{\"msg\": \"¿Cuántas horas debe estar mi mascota en ayuno antes de la operación?\", \"session_id\": \"test-rag-1\"}"
+
+# 2 — Preparación previa
+curl -X POST http://127.0.0.1:8000/chat \
+  -H "Content-Type: application/json" \
+  -d "{\"msg\": \"¿Qué debo hacer la noche anterior a la cirugía?\", \"session_id\": \"test-rag-2\"}"
+
+# 3 — Agua
+curl -X POST http://127.0.0.1:8000/chat \
+  -H "Content-Type: application/json" \
+  -d "{\"msg\": \"¿Puede beber agua mi perro antes de la operación?\", \"session_id\": \"test-rag-3\"}"
+```
 
 ---
 

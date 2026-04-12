@@ -20,7 +20,10 @@ def _session_cfg(session_id: str) -> dict:
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    """Avoid live HTTP to the pre-op URL during FastAPI lifespan (VE-28)."""
+    with patch("main.load_preop_rag_index"):
+        with TestClient(app) as test_client:
+            yield test_client
 
 
 @pytest.fixture(autouse=True)
