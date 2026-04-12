@@ -105,6 +105,19 @@ def _load_credentials() -> Credentials | None:
     )
 
 
+def is_google_calendar_live_enabled() -> bool:
+    """Return True when Calendar API calls should hit Google (not stub, env complete).
+
+    Used by :mod:`tools.availability` to decide whether
+    ``check_surgical_availability`` reads occupancy from Calendar.
+    """
+    if _truthy_env("GOOGLE_CALENDAR_USE_STUB"):
+        return False
+    if not _required_env("GOOGLE_CALENDAR_ID"):
+        return False
+    return _load_credentials() is not None
+
+
 def _event_boundary(ev: dict[str, Any], key: str) -> str:
     block = ev.get(key) or {}
     if not isinstance(block, dict):
@@ -211,6 +224,11 @@ def list_google_calendar_events_impl(
         service = build("calendar", "v3", http=http, cache_discovery=False)
         t_min = start.astimezone().isoformat()
         t_max = end.astimezone().isoformat()
+        logger.info(
+            "Google Calendar API HTTP request to calendar.googleapis.com "
+            "(calendar v3 events.list, calendarId=%s)",
+            cal_id,
+        )
         events_result = (
             service.events()
             .list(

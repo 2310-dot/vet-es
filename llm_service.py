@@ -1,4 +1,4 @@
-"""Central LLM call for the clinic chatbot (VE-20, VE-25, VE-28, VE-29).
+"""Central LLM call for the clinic chatbot (VE-20, VE-25, VE-28, VE-29, VE-30).
 
 FastAPI handlers delegate to :func:`invoke_chat_llm` or :data:`clinic_chat` so
 OpenAI credentials and prompt loading stay in one place.
@@ -8,9 +8,10 @@ pre-operative URL are appended to the system prompt before the model call.
 
 VE-25: Conversational path with session history from :mod:`conversation_memory`.
 
-VE-29: The chat model binds ``check_surgical_availability`` (mock orientative
-theatre availability). Tool results are appended and the model is re-invoked
-until it returns a final text reply.
+VE-29 / VE-30: The chat model binds ``check_surgical_availability`` (orientative
+theatre availability: mock table or Google Calendar when configured). Tool
+results are appended and the model is re-invoked until it returns a final text
+reply.
 
 The long system prompt is **not** inlined in Python. It is read at runtime from
 ``prompt.md`` in the repository root (next to ``main.py``). The brief pointer
