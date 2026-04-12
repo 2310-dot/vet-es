@@ -9,6 +9,7 @@ import pytest
 from preop_rag.config import OFFICIAL_PREOP_DOC_URL
 from preop_rag.fetch import fetch_preop_html
 from preop_rag.runtime import (
+    get_indexed_preop_source_url,
     get_preop_vector_store,
     load_preop_rag_index,
     reset_preop_rag_runtime_for_tests,
@@ -34,3 +35,4 @@ def test_full_index_build_fake_embeddings(monkeypatch: pytest.MonkeyPatch) -> No
     reset_preop_rag_runtime_for_tests()
     load_preop_rag_index()
     assert get_preop_vector_store() is not None
+    assert get_indexed_preop_source_url() == OFFICIAL_PREOP_DOC_URL

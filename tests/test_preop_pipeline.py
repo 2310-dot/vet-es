@@ -7,6 +7,7 @@ from pathlib import Path
 from langchain_community.embeddings import FakeEmbeddings
 from langchain_core.documents import Document
 
+from preop_rag.config import OFFICIAL_PREOP_DOC_URL
 from preop_rag.extract import html_to_documents
 from preop_rag.pipeline import build_vector_store, retrieve_top_k, split_documents
 
@@ -22,6 +23,15 @@ def test_pipeline_retrieves_fasting_benchmark_chunk() -> None:
     joined = "\n".join(h.page_content for h in hits)
     assert "VE22_BENCHMARK_FASTING" in joined
     assert "twelve hours" in joined.lower()
+
+
+def test_chunks_carry_official_source_url_in_metadata() -> None:
+    """VET-11: retrieved segments remain tied to the canonical page URL in metadata."""
+    html = FIXTURE.read_text(encoding="utf-8")
+    docs = html_to_documents(html, source_url=OFFICIAL_PREOP_DOC_URL)
+    chunks = split_documents(docs)
+    assert chunks
+    assert all(c.metadata.get("source") == OFFICIAL_PREOP_DOC_URL for c in chunks)
 
 
 def test_retrieve_top_k_rejects_zero() -> None:
