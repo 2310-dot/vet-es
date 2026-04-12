@@ -7,17 +7,20 @@ only. Bump ``PREOP_RAG_CONFIG_VERSION`` when any of these change.
 from __future__ import annotations
 
 # Canonical config id (bump when chunking, URL, or default embedding model changes).
-PREOP_RAG_CONFIG_VERSION = "preop-rag-2026-04-11"
+PREOP_RAG_CONFIG_VERSION = "preop-rag-ve28-2026-04-12"
 
 # Official pre-operative instructions page (English) used as RAG source.
 OFFICIAL_PREOP_DOC_URL = (
     "https://veterinary-clinic-teal.vercel.app/en/docs/instructions-before-operation"
 )
 
-# RecursiveCharacterTextSplitter (langchain_text_splitters).
-CHUNK_SIZE = 900
-CHUNK_OVERLAP = 120
+# RecursiveCharacterTextSplitter (langchain_text_splitters); sizes are in characters.
+CHUNK_SIZE = 500
+CHUNK_OVERLAP = 50
 SPLITTER_NAME = "RecursiveCharacterTextSplitter"
+
+# Retrieved chunks appended to the system prompt per chat turn.
+TOP_K_RESULTS = 3
 
 # Default embedding provider for production-style runs (OpenAI).
 EMBEDDING_PROVIDER = "openai"

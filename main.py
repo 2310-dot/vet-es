@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import mimetypes
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import parse_qs
 
@@ -20,9 +22,18 @@ from llm_service import (
     LlmUpstreamError,
     clinic_chat,
 )
+from preop_rag.runtime import load_preop_rag_index
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 PUBLIC_DIR = Path(__file__).resolve().parent / "public"
+
+
+@asynccontextmanager
+async def _app_lifespan(_app: FastAPI):
+    """Build pre-op RAG index in a worker thread so startup stays responsive."""
+    await asyncio.to_thread(load_preop_rag_index)
+    yield
+
 
 app = FastAPI(
     title="Chatbot v4",
@@ -31,6 +42,7 @@ app = FastAPI(
         "GET / (HTML), POST /chat (JSON), POST /ask_bot (urlencoded), POST /askbot (JSON or "
         "urlencoded, VE-25), GET /public/{path}, GET /health, /static."
     ),
+    lifespan=_app_lifespan,
 )
 
 

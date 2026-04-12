@@ -1,7 +1,10 @@
-"""Central LLM call for the clinic chatbot (VE-20, VE-25).
+"""Central LLM call for the clinic chatbot (VE-20, VE-25, VE-28).
 
 FastAPI handlers delegate to :func:`invoke_chat_llm` or :data:`clinic_chat` so
 OpenAI credentials and prompt loading stay in one place.
+
+VE-28: When the pre-op index is loaded, retrieved chunks from the official
+pre-operative URL are appended to the system prompt before the model call.
 
 VE-25: **tool-free** conversational path only — ``ChatOpenAI`` with message
 history from :mod:`conversation_memory`. No ``bind_tools``, no agents.
@@ -27,6 +30,14 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from conversation_memory import session_messages_copy
+from preop_rag.pipeline import retrieve_top_k
+from preop_rag.runtime import (
+    PREOP_SOURCE_UNAVAILABLE_USER_MESSAGE,
+    get_preop_top_k,
+    get_preop_vector_store,
+    looks_like_preoperative_question,
+    preop_source_fetch_failed,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +162,30 @@ async def invoke_chat_llm(
     :raises LlmConfigurationError: Misconfiguration (key or prompt).
     :raises LlmUpstreamError: Provider or empty model output.
     """
+    if preop_source_fetch_failed() and looks_like_preoperative_question(user_message):
+        return PREOP_SOURCE_UNAVAILABLE_USER_MESSAGE
+
     system_text = load_system_prompt()
+    store = get_preop_vector_store()
+    if store is not None:
+        try:
+            docs = retrieve_top_k(store, user_message, k=get_preop_top_k())
+        except Exception:
+            logger.exception("Pre-op RAG retrieval failed; continuing without excerpts")
+            docs = []
+        if docs:
+            parts = [
+                f"[Excerpt {i}]\n{doc.page_content.strip()}"
+                for i, doc in enumerate(docs, start=1)
+            ]
+            block = "\n\n".join(parts)
+            system_text = (
+                f"{system_text}\n\n"
+                f"--- Retrieved pre-operative reference excerpts ---\n"
+                f"{block}\n"
+                f"--- End excerpts ---"
+            )
+
     api_key = _require_openai_api_key()
     model = ChatOpenAI(
         api_key=api_key,

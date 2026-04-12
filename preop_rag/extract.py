@@ -19,6 +19,8 @@ def html_to_documents(html: str, *, source_url: str) -> list[Document]:
     soup = BeautifulSoup(html, "html.parser")
     for tag in soup(["script", "style", "noscript"]):
         tag.decompose()
+    for tag in soup.find_all(["nav", "footer", "header", "aside"]):
+        tag.decompose()
     text = soup.get_text(separator="\n")
     lines = [ln.strip() for ln in text.splitlines()]
     collapsed = "\n".join(ln for ln in lines if ln)
