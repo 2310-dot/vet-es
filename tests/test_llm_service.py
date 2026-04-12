@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -30,10 +30,16 @@ def test_load_system_prompt_rejects_empty_file(tmp_path: Path) -> None:
             load_system_prompt()
 
 
+def _chat_instance_with_bind(mock_cls: MagicMock) -> MagicMock:
+    instance = mock_cls.return_value
+    instance.bind_tools = MagicMock(return_value=instance)
+    return instance
+
+
 def test_invoke_chat_llm_maps_provider_exception() -> None:
     with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
         with patch("llm_service.ChatOpenAI") as mock_cls:
-            instance = mock_cls.return_value
+            instance = _chat_instance_with_bind(mock_cls)
             instance.ainvoke = AsyncMock(
                 side_effect=RuntimeError("simulated network failure")
             )
@@ -47,7 +53,7 @@ def test_invoke_chat_llm_maps_provider_exception() -> None:
 def test_invoke_chat_llm_rejects_empty_model_content() -> None:
     with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
         with patch("llm_service.ChatOpenAI") as mock_cls:
-            instance = mock_cls.return_value
+            instance = _chat_instance_with_bind(mock_cls)
             instance.ainvoke = AsyncMock(return_value=AIMessage(content=""))
 
             with pytest.raises(LlmUpstreamError, match="empty response"):
@@ -86,7 +92,7 @@ def test_invoke_chat_llm_appends_preop_excerpts_when_index_loaded() -> None:
         with patch("llm_service.preop_source_fetch_failed", return_value=False):
             with patch("llm_service.get_preop_vector_store", return_value=store):
                 with patch("llm_service.ChatOpenAI") as mock_cls:
-                    instance = mock_cls.return_value
+                    instance = _chat_instance_with_bind(mock_cls)
                     instance.ainvoke = fake_ainvoke
                     asyncio.run(invoke_chat_llm("fasting before surgery"))
 
@@ -113,7 +119,7 @@ def test_invoke_chat_llm_uses_system_prompt_from_file() -> None:
 
     with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test-key"}):
         with patch("llm_service.ChatOpenAI") as mock_cls:
-            instance = mock_cls.return_value
+            instance = _chat_instance_with_bind(mock_cls)
             instance.ainvoke = fake_ainvoke
             result = asyncio.run(invoke_chat_llm("user question"))
 
@@ -123,4 +129,38 @@ def test_invoke_chat_llm_uses_system_prompt_from_file() -> None:
     assert captured[0].content == system_text
     assert isinstance(captured[1], HumanMessage)
     assert captured[1].content == "user question"
+
+
+def test_invoke_chat_llm_executes_tool_then_returns_text() -> None:
+    """VE-29: model may emit tool_calls; service runs tool and re-invokes."""
+    calls: list[int] = []
+
+    async def fake_ainvoke(messages):
+        calls.append(len(messages))
+        if len(calls) == 1:
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "check_surgical_availability",
+                        "args": {"date": "2026-04-14"},
+                        "id": "call_tc1",
+                    }
+                ],
+            )
+        return AIMessage(
+            content="Orientative availability only; contact the clinic to confirm."
+        )
+
+    with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
+        with patch("llm_service.ChatOpenAI") as mock_cls:
+            instance = _chat_instance_with_bind(mock_cls)
+            instance.ainvoke = fake_ainvoke
+            out = asyncio.run(
+                invoke_chat_llm("Is there theatre space next Tuesday?")
+            )
+
+    assert out.startswith("Orientative")
+    assert len(calls) == 2
+    assert calls[1] > calls[0]
 

@@ -1,4 +1,4 @@
-"""Central LLM call for the clinic chatbot (VE-20, VE-25, VE-28).
+"""Central LLM call for the clinic chatbot (VE-20, VE-25, VE-28, VE-29).
 
 FastAPI handlers delegate to :func:`invoke_chat_llm` or :data:`clinic_chat` so
 OpenAI credentials and prompt loading stay in one place.
@@ -6,8 +6,11 @@ OpenAI credentials and prompt loading stay in one place.
 VE-28: When the pre-op index is loaded, retrieved chunks from the official
 pre-operative URL are appended to the system prompt before the model call.
 
-VE-25: **tool-free** conversational path only — ``ChatOpenAI`` with message
-history from :mod:`conversation_memory`. No ``bind_tools``, no agents.
+VE-25: Conversational path with session history from :mod:`conversation_memory`.
+
+VE-29: The chat model binds ``check_surgical_availability`` (mock orientative
+theatre availability). Tool results are appended and the model is re-invoked
+until it returns a final text reply.
 
 The long system prompt is **not** inlined in Python. It is read at runtime from
 ``prompt.md`` in the repository root (next to ``main.py``). The brief pointer
@@ -22,14 +25,18 @@ an :class:`~langchain_core.messages.AIMessage` with a string ``.content``.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from pathlib import Path
+from typing import Any
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
 
 from conversation_memory import session_messages_copy
+from tools.availability import check_surgical_availability
 from preop_rag.pipeline import retrieve_top_k
 from preop_rag.runtime import (
     PREOP_SOURCE_UNAVAILABLE_USER_MESSAGE,
@@ -40,6 +47,9 @@ from preop_rag.runtime import (
 )
 
 logger = logging.getLogger(__name__)
+
+CLINIC_TOOLS: list[BaseTool] = [check_surgical_availability]
+_MAX_TOOL_ROUNDS = 8
 
 # Repo root-relative file (this module lives next to main.py).
 SYSTEM_PROMPT_FILE = Path(__file__).resolve().parent / "prompt.md"
@@ -133,6 +143,65 @@ def _llm_debug_errors_enabled() -> bool:
     )
 
 
+def _tools_by_name() -> dict[str, BaseTool]:
+    return {tool.name: tool for tool in CLINIC_TOOLS}
+
+
+async def _invoke_until_text_reply(
+    model: ChatOpenAI,
+    messages: list,
+) -> str:
+    """Run ``model`` with tools bound; loop on tool calls until text output."""
+    model_with_tools = model.bind_tools(CLINIC_TOOLS)
+    lookup = _tools_by_name()
+    for _ in range(_MAX_TOOL_ROUNDS):
+        result = await model_with_tools.ainvoke(messages)
+        if not isinstance(result, AIMessage):
+            raise LlmUpstreamError(
+                "The assistant returned an unexpected response type."
+            )
+        tool_calls = getattr(result, "tool_calls", None) or []
+        if not tool_calls:
+            text = _extract_text_content(result)
+            if not text:
+                raise LlmUpstreamError("The assistant returned an empty response.")
+            return text
+
+        messages.append(result)
+        for tc in tool_calls:
+            if isinstance(tc, dict):
+                name = tc.get("name") or ""
+                tool_call_id = tc.get("id") or ""
+                raw_args = tc.get("args")
+            else:
+                name = getattr(tc, "name", "") or ""
+                tool_call_id = getattr(tc, "id", "") or ""
+                raw_args = getattr(tc, "args", None)
+            args = raw_args if isinstance(raw_args, dict) else {}
+            tool = lookup.get(name)
+            if tool is None:
+                payload: dict[str, Any] = {"error": f"Unknown tool: {name}"}
+            else:
+                try:
+                    raw = tool.invoke(args)
+                    payload = raw if isinstance(raw, dict) else {"result": raw}
+                except Exception:
+                    logger.exception("Tool invocation failed (name=%s)", name)
+                    payload = {
+                        "error": "TOOL_FAILED",
+                        "message": "Tool execution failed; try again or rephrase.",
+                    }
+            messages.append(
+                ToolMessage(
+                    content=json.dumps(payload, ensure_ascii=False),
+                    tool_call_id=tool_call_id,
+                )
+            )
+    raise LlmUpstreamError(
+        "The assistant stopped after too many tool calls; please try again."
+    )
+
+
 def _extract_text_content(message: AIMessage) -> str:
     content = message.content
     if isinstance(content, str):
@@ -203,15 +272,7 @@ async def invoke_chat_llm(
     messages.append(HumanMessage(content=user_message))
 
     try:
-        result = await model.ainvoke(messages)
-        if not isinstance(result, AIMessage):
-            raise LlmUpstreamError(
-                "The assistant returned an unexpected response type."
-            )
-        text = _extract_text_content(result)
-        if not text:
-            raise LlmUpstreamError("The assistant returned an empty response.")
-        return text
+        return await _invoke_until_text_reply(model, messages)
     except LlmUpstreamError:
         raise
     except Exception as exc:
