@@ -239,7 +239,11 @@ Fuente obligatoria del caso (inglés), fijada en código:
 | Constante | `OFFICIAL_PREOP_DOC_URL` en [preop_rag/config.py](preop_rag/config.py) |
 | URL | [https://veterinary-clinic-teal.vercel.app/en/docs/instructions-before-operation](https://veterinary-clinic-teal.vercel.app/en/docs/instructions-before-operation) |
 
-Al arrancar, `load_preop_rag_index()` ([preop_rag/runtime.py](preop_rag/runtime.py)) construye un vector store en memoria; [llm_service.py](llm_service.py) inyecta fragmentos bajo `--- Retrieved pre-operative reference excerpts ---`.
+Resolución efectiva: `_resolve_source_url()` en [preop_rag/runtime.py](preop_rag/runtime.py) usa `PREOP_RAG_LIVE_URL` si está definida; **si no**, la URL anterior. El HTML descargado de esa URL se trocea; cada chunk conserva `metadata["source"]` igual a la URL indexada ([preop_rag/extract.py](preop_rag/extract.py), comprobado en [tests/test_preop_pipeline.py](tests/test_preop_pipeline.py)).
+
+Al arrancar, `load_preop_rag_index()` construye un `InMemoryVectorStore`; en cada turno de chat, [llm_service.py](llm_service.py) llama a `retrieve_top_k()` y, si hay *hits*, añade al *system prompt* el bloque delimitado por `--- Retrieved pre-operative reference excerpts ---` … `--- End excerpts ---` (véase `invoke_chat_llm`).
+
+**Compatibilidad prompt + RAG (rúbrica):** En [docs/conversaciones-aceptacion-chatbot.md](docs/conversaciones-aceptacion-chatbot.md) se indica que el mismo dato puede vivir en `prompt.md`, en fragmentos recuperados o en ambos. **Que la respuesta sobre ayuno coincida con el prompt no invalida el +1 RAG (VET-11)** si queda demostrado el pipeline (ingesta desde la URL oficial, índice y recuperación que alimentan al modelo).
 
 ```mermaid
 flowchart TD
@@ -255,17 +259,18 @@ flowchart TD
 
 #### VET-11 (+1 RAG): evidencia
 
-Criterio alineado con [docs/conversaciones-aceptacion-chatbot.md](docs/conversaciones-aceptacion-chatbot.md) (conv. 10 / ayuno preoperatorio):
+1. **Ingesta desde la URL oficial** — Índice construido con el HTML de la URL efectiva (`OFFICIAL_PREOP_DOC_URL` salvo `PREOP_RAG_LIVE_URL`; documentado en [`.env.example`](.env.example)). Tras un indexado exitoso, `load_preop_rag_index()` asigna `_indexed_source_url` a esa URL antes del log `Pre-op RAG index ready` ([preop_rag/runtime.py](preop_rag/runtime.py)).
+2. **Retriever observable (qué mirar en el código y en runtime)**  
+   - **Arranque:** log `INFO` del logger `preop_rag.runtime`: `Pre-op RAG index ready (source=<URL>, chunks=N, fake_embeddings=…)` — el `<URL>` debe ser la indexada (oficial u override).  
+   - **Introspección:** `get_indexed_preop_source_url()` devuelve esa URL tras un arranque correcto; los tests `tests/test_preop_runtime.py` y `tests/test_preop_live.py` aserten que coincide con `OFFICIAL_PREOP_DOC_URL` cuando no hay override.  
+   - **Por petición:** el código **no** escribe un log `INFO` en cada `similarity_search` exitoso; la traza observable por turno es el **contenido del `SystemMessage`** enviado al modelo: si hay documentos recuperados, incluye el marcador `Retrieved pre-operative reference excerpts` y los `[Excerpt n]` ([llm_service.py](llm_service.py)). Eso puede comprobarse con depurador, *logging* temporal o el test `test_invoke_chat_llm_appends_preop_excerpts_when_index_loaded` en [tests/test_llm_service.py](tests/test_llm_service.py).  
+   - **Fallo de recuperación:** solo entonces se registra excepción (`Pre-op RAG retrieval failed; continuing without excerpts`).
+3. **Pruebas automáticas** — `pytest tests/test_preop_config.py` (URL esperada); `tests/test_preop_pipeline.py` (`metadata["source"]` y `retrieve_top_k`); `tests/test_preop_runtime.py` (URL indexada sin override). Con red: `RUN_PREOP_RAG_LIVE=1 pytest -m preop_live`.
+4. **Demo CLI** — `python -m preop_rag.demo` imprime en *stderr* `source_url=...`.
 
-1. **Ingesta desde la URL oficial** — `OFFICIAL_PREOP_DOC_URL` apunta a la página anterior; el índice usa el HTML de esa URL salvo *override* `PREOP_RAG_LIVE_URL` (documentado en [`.env.example`](.env.example)).
-2. **Retriever observable** — Tras arranque OK, log `INFO` de `preop_rag.runtime`: `Pre-op RAG index ready (source=<URL>, chunks=N, fake_embeddings=...)`.
-3. **Comprobación en código** — `get_indexed_preop_source_url()` en `preop_rag/runtime.py` devuelve la URL indexada (o `None`).
-4. **Pruebas automáticas** — `pytest tests/test_preop_config.py`; `tests/test_preop_pipeline.py` (`metadata["source"]`); `tests/test_preop_runtime.py` (sin override, URL oficial). Con red: `RUN_PREOP_RAG_LIVE=1 pytest -m preop_live`.
-5. **Demo CLI** — `python -m preop_rag.demo` imprime en *stderr* `source_url=...`.
+**Config / variables / errores:** chunking y `TOP_K_RESULTS` en `preop_rag/config.py`; `PREOP_RAG_FAKE_EMBEDDINGS=1` para índice sin embeddings OpenAI; si la URL no responde, mensaje fijado: *«No se pudo acceder a la fuente de información preoperatoria. Por favor, inténtalo de nuevo.»*
 
-**Config / variables / errores / demo:** chunking y `TOP_K_RESULTS` en `preop_rag/config.py`; `PREOP_RAG_FAKE_EMBEDDINGS=1` para desarrollo sin embeddings OpenAI; si la URL falla, mensaje fijado en código: *«No se pudo acceder a la fuente de información preoperatoria. Por favor, inténtalo de nuevo.»*
-
-**Conv. 10 (inglés)** — RAG activo (`OPENAI_API_KEY` o `PREOP_RAG_FAKE_EMBEDDINGS=1` con fetch OK). Comprobar ayuno/agua y bloque `Retrieved pre-operative reference excerpts` en el *system prompt* si depuras.
+**Conv. 10 (inglés)** — Con RAG activo (`OPENAI_API_KEY` o `PREOP_RAG_FAKE_EMBEDDINGS=1` con fetch OK). Puedes validar coherencia con la página oficial **y** comprobar en depuración que el *system prompt* lleva el bloque de excerpts; **no** es requisito que la redacción final difiera de `prompt.md` si el retriever está probado como arriba.
 
 | Turno | Qué comprobar |
 | ----- | ------------- |
@@ -320,7 +325,7 @@ Los intents alineados con las 10 conversaciones de aceptación están descritos 
 | Base: memoria + dominio + prompt | `conversation_memory`, `prompt.md`, rutas chat | Conv. 1–7 en `docs/conversaciones-aceptacion-chatbot.md`; tests memoria/LLM según `tests/` |
 | + Vercel | Despliegue | Panel [2310-dots-projects/vet-es](https://vercel.com/2310-dots-projects/vet-es); `vercel.json`, `api/` |
 | + Jira | Gestión backlog | [Proyecto VE](https://eliuperez4.atlassian.net/jira/software/projects/VE/issues) |
-| + RAG (URL oficial) | `preop_rag/` + `llm_service` | `OFFICIAL_PREOP_DOC_URL`, tests preop, conv. 10 |
+| + RAG (URL oficial) | `preop_rag/` + `llm_service` | URL oficial en código + índice + recuperación al prompt; tests preop + `test_llm_service`; conv. 10 (la respuesta puede solaparse con `prompt.md`, véase doc de conversaciones) |
 | + Tool disponibilidad | `tools/availability.py`, Calendar opcional | Conv. 8–9; `tests/test_availability.py` |
 | + Intents documentados | Documentación | `docs/conversaciones-aceptacion-chatbot.md` |
 
@@ -348,7 +353,7 @@ Los intents alineados con las 10 conversaciones de aceptación están descritos 
 
 1. **Automatizado:** `pytest` (con venv y `requirements-dev.txt` si aplica).
 2. **Conversaciones de aceptación:** seguir [docs/conversaciones-aceptacion-chatbot.md](docs/conversaciones-aceptacion-chatbot.md) (orden conv. 1–7 base; 8–9 tool; 10 RAG).
-3. **RAG:** con servidor en marcha y RAG activo (`OPENAI_API_KEY` o `PREOP_RAG_FAKE_EMBEDDINGS=1` con fetch OK), usar los ejemplos `curl` de la conv. 10 en ese documento o preguntas en español del mismo guion.
+3. **RAG:** con servidor en marcha y RAG activo (`OPENAI_API_KEY` o `PREOP_RAG_FAKE_EMBEDDINGS=1` con fetch OK), usar los ejemplos `curl` de la conv. 10 en ese documento o preguntas en español del mismo guion. Para evidencia del retriever, revisar log de arranque, `get_indexed_preop_source_url()` o el bloque de excerpts en el *system message* (no hay log INFO por cada búsqueda exitosa).
 4. **Disponibilidad:** mensaje de chat que dispare la tool o logs `[tool] check_surgical_availability` en [tools/availability.py](tools/availability.py); con Google en vivo, trazas hacia `calendar.googleapis.com` en [google_calendar_tool.py](google_calendar_tool.py).
 
 ---
