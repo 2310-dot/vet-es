@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -524,8 +524,9 @@ def test_invoke_chat_llm_uses_system_prompt_from_file() -> None:
     import llm_service
     from llm_service import invoke_chat_llm
 
-    system_text = llm_service.load_system_prompt()
+    system_text = llm_service.compose_base_system_prompt()
     assert "must not diagnose" in system_text.lower()
+    assert "clinic contact channels" in system_text.lower()
 
     captured: list = []
 
@@ -536,6 +537,7 @@ def test_invoke_chat_llm_uses_system_prompt_from_file() -> None:
     with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test-key"}):
         with patch("llm_service.ChatOpenAI") as mock_cls:
             instance = mock_cls.return_value
+            instance.bind_tools = MagicMock(return_value=instance)
             instance.ainvoke = fake_ainvoke
             result = asyncio.run(invoke_chat_llm("user question"))
 

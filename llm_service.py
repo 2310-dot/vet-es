@@ -121,6 +121,38 @@ def load_system_prompt() -> str:
     return raw.strip()
 
 
+def _clinic_contact_runtime_block() -> str:
+    """Human-handoff lines from env (never logged). Empty vars → fallback guidance."""
+    phone = os.environ.get("CLINIC_PHONE", "").strip()
+    email = os.environ.get("CLINIC_EMAIL", "").strip()
+    lines = [
+        "## Clinic contact channels (from environment)",
+        "",
+    ]
+    if phone:
+        lines.append(f"Published clinic phone (use verbatim): {phone}")
+    if email:
+        lines.append(f"Published clinic email (use verbatim): {email}")
+    if not phone and not email:
+        lines.append(
+            "Neither CLINIC_PHONE nor CLINIC_EMAIL is set. For human handoff "
+            "(billing, invoices, speaking to reception), direct clients to the "
+            "phone number and email on the clinic's official website or their "
+            "appointment paperwork. Do not invent numbers or addresses."
+        )
+    else:
+        lines.append(
+            "When the user asks for a person, offer these configured channels "
+            "along with reception; do not alter or fabricate them."
+        )
+    return "\n".join(lines).strip()
+
+
+def compose_base_system_prompt() -> str:
+    """``prompt.md`` plus optional clinic contact lines for LLM runtime (VE-25)."""
+    return f"{load_system_prompt().rstrip()}\n\n{_clinic_contact_runtime_block()}"
+
+
 def _require_openai_api_key() -> str:
     key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not key:
@@ -235,7 +267,7 @@ async def invoke_chat_llm(
     if preop_source_fetch_failed() and looks_like_preoperative_question(user_message):
         return PREOP_SOURCE_UNAVAILABLE_USER_MESSAGE
 
-    system_text = load_system_prompt()
+    system_text = compose_base_system_prompt()
     store = get_preop_vector_store()
     if store is not None:
         try:
