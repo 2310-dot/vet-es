@@ -331,6 +331,30 @@ def test_session_memory_continuity(client: TestClient) -> None:
     ]
 
 
+def test_session_memory_three_turn_continuity(client: TestClient) -> None:
+    """VE-27 AC2: same session_id stays coherent over three or more turns."""
+    with patch("main.clinic_chat.ainvoke", new_callable=AsyncMock) as mock_llm:
+        mock_llm.side_effect = [
+            AIMessage(content="r0"),
+            AIMessage(content="r1"),
+            AIMessage(content="r2"),
+        ]
+        for turn in range(3):
+            resp = client.post(
+                "/chat",
+                json={"msg": f"m{turn}", "session_id": "s-three-turns"},
+            )
+            assert resp.json()["turn_count"] == turn + 1
+    assert session_messages_copy("s-three-turns") == [
+        ("user", "m0"),
+        ("assistant", "r0"),
+        ("user", "m1"),
+        ("assistant", "r1"),
+        ("user", "m2"),
+        ("assistant", "r2"),
+    ]
+
+
 def test_session_memory_cross_endpoint_parity(client: TestClient) -> None:
     with patch("main.clinic_chat.ainvoke", new_callable=AsyncMock) as mock_llm:
         mock_llm.side_effect = [
@@ -373,6 +397,38 @@ def test_chat_memory_max_turns_trims(
     ]
 
 
+def test_chat_memory_ttl_purges_session_on_read(
+    monkeypatch: pytest.MonkeyPatch, client: TestClient
+) -> None:
+    """VE-27: after TTL, the next read drops the session so turn_count resets."""
+    monkeypatch.setenv("CHAT_MEMORY_TTL_SECONDS", "30")
+    mono_values = [1000.0, 1000.0, 1050.0, 1050.0, 1050.0]
+
+    def fake_monotonic() -> float:
+        return mono_values.pop(0)
+
+    with patch("conversation_memory.time.monotonic", fake_monotonic):
+        with patch("main.clinic_chat.ainvoke", new_callable=AsyncMock) as mock_llm:
+            mock_llm.side_effect = [
+                AIMessage(content="first"),
+                AIMessage(content="after-ttl"),
+            ]
+            r1 = client.post(
+                "/chat",
+                json={"msg": "one", "session_id": "s-ttl-purge"},
+            )
+            r2 = client.post(
+                "/chat",
+                json={"msg": "two", "session_id": "s-ttl-purge"},
+            )
+        assert r1.json()["turn_count"] == 1
+        assert r2.json()["turn_count"] == 1
+        assert session_messages_copy("s-ttl-purge") == [
+            ("user", "two"),
+            ("assistant", "after-ttl"),
+        ]
+
+
 def test_session_memory_case_sensitive_keys(client: TestClient) -> None:
     with patch("main.clinic_chat.ainvoke", new_callable=AsyncMock) as mock_llm:
         mock_llm.side_effect = [AIMessage(content="x"), AIMessage(content="y")]
@@ -400,6 +456,33 @@ def test_invalid_chat_does_not_write_session_memory(client: TestClient) -> None:
         )
         assert bad_ct.status_code == 422
         assert len(session_messages_copy("s-inv")) == 2
+
+
+def test_invalid_askbot_does_not_write_session_memory(client: TestClient) -> None:
+    """VE-27: 422/415 on /askbot must not append to the session transcript."""
+    with patch("main.clinic_chat.ainvoke", new_callable=AsyncMock) as mock_llm:
+        mock_llm.return_value = AIMessage(content="ok")
+        client.post(
+            "/askbot",
+            json={"msg": "hi", "session_id": "s-askbot-inv"},
+        )
+        bad415 = client.post(
+            "/askbot",
+            content=b"{}",
+            headers={"content-type": "text/plain"},
+        )
+        assert bad415.status_code == 415
+        assert session_messages_copy("s-askbot-inv") == [
+            ("user", "hi"),
+            ("assistant", "ok"),
+        ]
+
+        bad422 = client.post(
+            "/askbot",
+            json={"msg": "", "session_id": "s-askbot-inv"},
+        )
+        assert bad422.status_code == 422
+        assert len(session_messages_copy("s-askbot-inv")) == 2
 
 
 def test_invalid_ask_bot_does_not_write_session_memory(client: TestClient) -> None:
